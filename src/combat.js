@@ -1,172 +1,90 @@
-// Combat: bullets, the player's pistol, muzzle flashes and the damage that
-// follows. A bullet is a fast point with a short life; it stops at the first
-// thing it meets — a wall, a car, a cop, a rival, or the player.
+// Combat: hitscan shooting with tracers and muzzle flash. The player
+// shoots with the mouse; foot cops shoot back (police.js). Pedestrians,
+// traffic cars, police cars and foot cops can all be hit.
 
-import { PLAYER } from './config.js';
-import { clamp } from './random.js';
-import { damageCar } from './vehicles.js';
+import { CFG } from './config.js';
 
-const BULLET_SPEED = 900;
-
-/** A shot from (x, y) along `angle`, fired by 'player', 'cop' or 'gang'. */
-export function fireBullet(G, x, y, angle, from, damage = PLAYER.pistolDamage) {
-  G.bullets.push({
-    x: x + Math.cos(angle) * 18,
-    y: y + Math.sin(angle) * 18,
-    vx: Math.cos(angle) * BULLET_SPEED,
-    vy: Math.sin(angle) * BULLET_SPEED,
-    life: PLAYER.pistolRange / BULLET_SPEED,
-    from,
-    damage,
-  });
-  G.gunfireX = x;
-  G.gunfireY = y;
-  G.gunfireTimer = 0.4;
-  G.particles.push({
-    x: x + Math.cos(angle) * 22,
-    y: y + Math.sin(angle) * 22,
-    vx: 0,
-    vy: 0,
-    life: 0.07,
-    max: 0.07,
-    size: 12,
-    color: '#ffd23f',
-    kind: 'flash',
-  });
-}
-
-function hitBuilding(G, x, y) {
-  for (const b of G.city.buildings) {
-    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return true;
+export class Combat {
+  constructor() {
+    this.tracers = []; // {x1,y1,x2,y2,t,color}
+    this.muzzle = null; // {x,y,t}
   }
-  return false;
-}
 
-export function updateBullets(G, dt) {
-  for (let i = G.bullets.length - 1; i >= 0; i--) {
-    const b = G.bullets[i];
-    b.x += b.vx * dt;
-    b.y += b.vy * dt;
-    b.life -= dt;
-    let dead = b.life <= 0;
-    if (!dead && hitBuilding(G, b.x, b.y)) {
-      dead = true;
-      G.particles.push({ x: b.x, y: b.y, vx: 0, vy: 0, life: 0.2, max: 0.2, size: 5, color: '#d8d2c4', kind: 'spark' });
+  addTracer(x1, y1, x2, y2, color) {
+    this.tracers.push({ x1, y1, x2, y2, t: 0.09, color: color || '#ffd76a' });
+  }
+
+  // Fire one hitscan round from (x, y) along angle. Returns the hit point.
+  shoot(game, x, y, angle) {
+    const range = CFG.player.shotRange;
+    const dx = Math.cos(angle), dy = Math.sin(angle);
+    let bestT = range, hit = null, hitKind = null;
+    const test = (cx, cy, r, kind, ref) => {
+      const ox = cx - x, oy = cy - y;
+      const t = ox * dx + oy * dy;
+      if (t < 0 || t > bestT) return;
+      const px = x + dx * t, py = y + dy * t;
+      const d = Math.hypot(cx - px, cy - py);
+      if (d < r) { bestT = t; hit = ref; hitKind = kind; }
+    };
+    for (const p of game.peds.list) test(game.peds.px(p), game.peds.py(p), 12, 'ped', p);
+    for (const cop of game.police.cops) test(cop.x, cop.y, 12, 'cop', cop);
+    for (const c of game.traffic.list) test(game.traffic.x(c), game.traffic.y(c), 26, 'traffic', c);
+    for (const c of game.police.cars) test(c.x, c.y, 26, 'police', c);
+    if (game.player.car && game.player.car !== null) {
+      // The player's own car never blocks a shot.
     }
-    if (!dead && b.from !== 'player') {
-      // Enemy fire can hit the player, on foot or through the windshield.
-      const d = Math.hypot(G.player.x - b.x, G.player.y - b.y);
-      const radius = G.player.onFoot ? 14 : 20;
-      if (d < radius) {
-        dead = true;
-        hurtPlayer(G, b.damage, b.from);
+    const hx = x + dx * bestT, hy = y + dy * bestT;
+    this.addTracer(x, y, hx, hy);
+    this.muzzle = { x, y, t: 0.05 };
+    game.peds.scare(hx, hy);
+    if (hit) {
+      if (hitKind === 'ped') {
+        game.peds.list = game.peds.list.filter((p) => p !== hit);
+        game.peds.list.push(game.peds.spawn());
+        game.police.addCrime(CFG.wanted.kill, game);
+      } else if (hitKind === 'cop') {
+        hit.health -= CFG.player.shotDamage;
+        game.police.addCrime(CFG.wanted.shoot, game);
+        if (hit.health <= 0) game.police.addCrime(CFG.wanted.kill, game);
+      } else if (hitKind === 'traffic') {
+        hit.hp = (hit.hp ?? 68) - CFG.player.shotDamage;
+        if (hit.hp <= 0) hit.speed = 0;
+        game.police.addCrime(CFG.wanted.shoot, game);
+      } else if (hitKind === 'police') {
+        hit.health -= CFG.player.shotDamage;
+        if (hit.health <= 0) hit.wrecked = true;
+        game.police.addCrime(CFG.wanted.shoot, game);
       }
+      game.particles.push({ x: hx, y: hy, t: 0.25, color: '#ff5a4a', n: 8 });
+    } else {
+      game.particles.push({ x: hx, y: hy, t: 0.15, color: '#c9c9c9', n: 4 });
     }
-    if (!dead && b.from === 'player') {
-      // Player fire can hit gang members, cops and cars.
-      for (const ped of G.peds) {
-        if (ped.state === 'down') continue;
-        if (Math.hypot(ped.x - b.x, ped.y - b.y) < 13) {
-          dead = true;
-          if (ped.gang) {
-            ped.hp -= b.damage;
-            if (ped.hp <= 0) {
-              ped.state = 'down';
-              ped.downTimer = 999;
-              G.player.wantedHeat = Math.min(100, G.player.wantedHeat + 10);
-              G.player.lastCrime = G.time;
-            }
-          } else {
-            ped.state = 'down';
-            ped.downTimer = 8;
-            G.player.wantedHeat = Math.min(100, G.player.wantedHeat + 25);
-            G.player.lastCrime = G.time;
-            G.message = 'You shot a civilian! The police are coming.';
-            G.messageTimer = 3;
-          }
-          break;
-        }
-      }
-      if (!dead) {
-        for (const cop of G.cops) {
-          if (Math.hypot(cop.x - b.x, cop.y - b.y) < 13) {
-            dead = true;
-            cop.hp -= b.damage;
-            if (cop.hp <= 0) {
-              cop.down = true;
-              cop.downTimer = 999;
-              G.player.wantedHeat = Math.min(100, G.player.wantedHeat + 35);
-              G.player.lastCrime = G.time;
-              G.message = 'You took down an officer! The whole force is after you.';
-              G.messageTimer = 3;
-            }
-            break;
-          }
-        }
-      }
-      if (!dead) {
-        for (const car of G.cars) {
-          if (car.wreck) continue;
-          if (Math.hypot(car.x - b.x, car.y - b.y) < 22) {
-            dead = true;
-            damageCar(G, car, b.damage * 0.5);
-            if (car.kind === 'police') {
-              G.player.wantedHeat = Math.min(100, G.player.wantedHeat + 8);
-              G.player.lastCrime = G.time;
-            }
-            break;
-          }
-        }
-      }
+    return { x: hx, y: hy };
+  }
+
+  update(dt) {
+    for (const t of this.tracers) t.t -= dt;
+    this.tracers = this.tracers.filter((t) => t.t > 0);
+    if (this.muzzle) { this.muzzle.t -= dt; if (this.muzzle.t <= 0) this.muzzle = null; }
+  }
+
+  draw(ctx, cam) {
+    for (const t of this.tracers) {
+      ctx.strokeStyle = t.color;
+      ctx.globalAlpha = Math.max(0, t.t / 0.09);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(t.x1 - cam.x, t.y1 - cam.y);
+      ctx.lineTo(t.x2 - cam.x, t.y2 - cam.y);
+      ctx.stroke();
     }
-    if (dead) G.bullets.splice(i, 1);
-  }
-}
-
-/** Hurt the player; at zero health the player is wasted. */
-export function hurtPlayer(G, amount, from) {
-  if (G.player.invuln > 0 || G.player.dead) return;
-  G.player.health -= amount;
-  G.player.lastHurt = G.time;
-  G.shake = Math.max(G.shake, 5);
-  if (G.player.health <= 0) {
-    G.player.health = 0;
-    G.player.dead = true;
-  }
-}
-
-/** The player's own shot, from the pistol, toward the mouse. */
-export function playerShoot(G, targetX, targetY) {
-  const p = G.player;
-  if (!p.onFoot || p.dead) return;
-  if (p.reloadTimer > 0 || p.fireTimer > 0) return;
-  if (p.ammo <= 0) {
-    p.reloadTimer = PLAYER.reloadSeconds;
-    G.audio.denied();
-    return;
-  }
-  p.ammo -= 1;
-  p.fireTimer = PLAYER.fireInterval;
-  const angle = Math.atan2(targetY - p.y, targetX - p.x);
-  p.angle = angle;
-  fireBullet(G, p.x, p.y, angle, 'player');
-  G.audio.gunshot();
-  G.player.wantedHeat = Math.min(100, G.player.wantedHeat + 2);
-  G.player.lastCrime = G.time;
-  if (p.ammo === 0) p.reloadTimer = PLAYER.reloadSeconds;
-}
-
-/** Update the player's reload and fire timers. */
-export function updatePlayerCombat(G, dt) {
-  const p = G.player;
-  if (p.fireTimer > 0) p.fireTimer -= dt;
-  if (p.reloadTimer > 0) {
-    p.reloadTimer -= dt;
-    if (p.reloadTimer <= 0) p.ammo = PLAYER.magSize;
-  }
-  if (p.invuln > 0) p.invuln -= dt;
-  // Health creeps back when the player has been safe for a while.
-  if (G.time - p.lastHurt > PLAYER.regenDelay && p.health > 0 && p.health < PLAYER.health) {
-    p.health = clamp(p.health + PLAYER.regenRate * dt, 0, PLAYER.health);
+    ctx.globalAlpha = 1;
+    if (this.muzzle) {
+      ctx.fillStyle = '#ffe9a8';
+      ctx.beginPath();
+      ctx.arc(this.muzzle.x - cam.x, this.muzzle.y - cam.y, 9, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }

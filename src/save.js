@@ -1,46 +1,34 @@
-// Save and continue: progress, cash and settings in localStorage. Nothing
-// leaves the browser; a missing or corrupt save just starts a new game.
+// Progress saves to localStorage: cash, story progress, stashes found and
+// the best wanted level reached. Nothing else leaves the machine.
 
-import { SAVE_KEY } from './config.js';
-
-const EMPTY_SAVE = {
-  missionsDone: 0,
-  cash: 0,
-  stashes: [],
-  bestScore: 0,
-  muted: false,
-  completedAt: null,
-};
+const KEY = 'coral-bay-hot-streets-v1';
 
 export function loadSave() {
   try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
-    if (!raw) return { ...EMPTY_SAVE, stashes: [] };
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return { ...EMPTY_SAVE, stashes: [] };
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (typeof d !== 'object' || d === null) return null;
     return {
-      ...EMPTY_SAVE,
-      ...parsed,
-      stashes: Array.isArray(parsed.stashes) ? parsed.stashes : [],
+      cash: Math.max(0, d.cash | 0),
+      mission: Math.max(0, Math.min(6, d.mission | 0)),
+      stashes: Math.max(0, d.stashes | 0),
+      bestWanted: Math.max(0, Math.min(5, d.bestWanted | 0)),
     };
-  } catch {
-    return { ...EMPTY_SAVE, stashes: [] };
-  }
+  } catch (e) { return null; }
 }
 
-export function writeSave(save) {
+export function storeSave(data) {
   try {
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(save));
-    return true;
-  } catch {
-    return false;
-  }
+    localStorage.setItem(KEY, JSON.stringify({
+      cash: data.cash | 0,
+      mission: data.mission | 0,
+      stashes: data.stashes | 0,
+      bestWanted: data.bestWanted | 0,
+    }));
+  } catch (e) { /* storage is best-effort */ }
 }
 
 export function clearSave() {
-  try {
-    window.localStorage.removeItem(SAVE_KEY);
-  } catch {
-    // Storage can be off: the save then lasts this visit only.
-  }
+  try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
 }

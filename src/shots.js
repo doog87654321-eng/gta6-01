@@ -1,130 +1,102 @@
-// Screenshot scenes behind ?shot=walk|drive|chase|mission|title. Each one
-// stages a real world from the fixed seed, places the player, the cars and
-// the police where the scene needs them, then plays the real rules forward
-// for a fixed number of steps with a small autopilot, so the frame is what a
-// short game really looks like — never a mock-up.
+// Screenshot staging: `?shot=walk|drive|chase|mission|title&seed=N` puts the
+// game into a real, playable scene and main.js sets window.__shotReady
+// once it has been painted. Every staged scene is the game itself running
+// — nothing is drawn just for the camera.
 
-import { STEP } from './config.js';
-import { MISSIONS, startMission } from './missions.js';
-import { makeCar, enterCar } from './vehicles.js';
-import { SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+import { CFG } from './config.js';
+import { Car } from './vehicles.js';
+import { roadCenter } from './city.js';
 
-/** No keys held, no mouse: the world idles while traffic and peds move. */
-const IDLE_INPUT = {
-  walkVector: () => null,
-  move: () => ({ steer: 0, drive: 0, run: false }),
-  shiftHeld: () => false,
-  mouse: { down: false, x: 0, y: 0 },
-};
-
-/** Foot on the gas, hands off the wheel: straight down the avenue. */
-const DRIVE_INPUT = {
-  walkVector: () => null,
-  move: () => ({ steer: 0, drive: 1, run: false }),
-  shiftHeld: () => false,
-  mouse: { down: false, x: 0, y: 0 },
-};
-
-function putPlayerInCar(G, model, x, y, angle) {
-  const car = makeCar(model, x, y, angle, 'parked');
-  car.driver = false;
-  car.speed = 220;
-  G.cars.push(car);
-  enterCar(G, car);
-  G.player.wantedHeat = 0;
+function giveCar(game, x, y, angle, color) {
+  const car = new Car(x, y, angle, color || '#b0483e', 'sedan');
+  car._city = game.city;
+  car.speed = 380;
+  game.player.car = car;
+  game.player.x = x;
+  game.player.y = y;
   return car;
 }
 
-function addPoliceCar(G, x, y, angle, speed) {
-  const car = makeCar('police', x, y, angle, 'police');
-  car.siren = true;
-  car.speed = speed;
-  car.ai.targetSpeed = 560;
-  G.cars.push(car);
-  G.policeCars.push(car);
+function addPoliceCar(game, x, y, angle) {
+  const car = new Car(x, y, angle, '#e8e8e8', 'sedan');
+  car.police = true;
+  car._city = game.city;
+  car.speed = 420;
+  game.police.cars.push(car);
   return car;
 }
 
-function addFootCop(G, x, y) {
-  G.cops.push({ x, y, angle: 0, speed: 0, hp: 60, down: false, downTimer: 0, bustTimer: 0 });
-}
+export function stageShot(game, name) {
+  const city = game.city;
+  const p = game.player;
+  game.state = 'playing';
+  game.cam.x = 0; game.cam.y = 0;
 
-/**
- * Stage the named scene on G (already a fresh world) and return the screen
- * to draw, the input to steer with, and how many fixed steps to play.
- */
-export function stageShot(name, G) {
-  const p = G.player;
-  // Staged scenes speak for themselves; the welcome line would stale-date them.
-  G.message = '';
-  G.messageTimer = 0;
   if (name === 'title') {
-    // A slow pan over downtown, traffic and peds alive underneath the title.
-    G.camera.x = 1500;
-    G.camera.y = 1300;
-    return { screen: SCREEN_TITLE, input: IDLE_INPUT, steps: Math.floor(4 / STEP) };
+    game.state = 'title';
+    game.cam.x = 1200; game.cam.y = 1400;
+    return;
   }
-  if (name === 'drive') {
-    // Ray in a Vortex GT, flying up the beach avenue, traffic alongside.
-    putPlayerInCar(G, 'sports', 3100, 1900, -Math.PI / 2);
-    G.player.car.speed = 430;
-    const taxi = makeCar('taxi', 3064, 1500, -Math.PI / 2, 'traffic');
-    taxi.speed = 300;
-    G.cars.push(taxi);
-    const sedan = makeCar('sedan', 3136, 1200, -Math.PI / 2, 'traffic');
-    sedan.speed = 260;
-    G.cars.push(sedan);
-    G.camera.x = p.x;
-    G.camera.y = p.y;
-    return { screen: SCREEN_PLAY, input: DRIVE_INPUT, steps: Math.floor(1.6 / STEP) };
-  }
-  if (name === 'chase') {
-    // Three stars, three interceptors on Ray's tail, the Hideout marked.
-    putPlayerInCar(G, 'muscle', 1900, 1500, -Math.PI / 2);
-    G.player.car.speed = 480;
-    G.mission = {
-      def: MISSIONS[2],
-      stageIndex: 2,
-      timer: 0,
-      progress: 0,
-      active: true,
-      done: false,
-      failed: false,
-      failReason: '',
-      targetCar: null,
-      gangLeft: 0,
-      spawned: false,
-    };
-    G.player.wantedHeat = 65;
-    G.player.lastCrime = G.time;
-    addPoliceCar(G, 1864, 1780, -Math.PI / 2, 520);
-    addPoliceCar(G, 1936, 1900, -Math.PI / 2, 500);
-    addPoliceCar(G, 1900, 2050, -Math.PI / 2, 540);
-    addFootCop(G, 1820, 1300);
-    addFootCop(G, 1980, 1250);
-    G.spawnTimer = 99;
-    G.camera.x = p.x;
-    G.camera.y = p.y;
-    return { screen: SCREEN_PLAY, input: DRIVE_INPUT, steps: Math.floor(2.2 / STEP) };
-  }
-  if (name === 'mission') {
-    // Turf War: Ray defends Bea's garage, pistol out, the Vultures closing in.
-    startMission(G, 4);
-    p.x = 700;
-    p.y = 2050;
+
+  if (name === 'walk') {
+    // Ray on foot by the park, pedestrians around, first job on the board.
+    p.car = null;
+    p.x = 700; p.y = roadCenter(7) - 40;
     p.angle = Math.PI / 2;
-    // The staged shootout is a photo, not a fight: Ray cannot die for it.
-    p.invuln = 999;
-    G.camera.x = p.x;
-    G.camera.y = p.y;
-    return { screen: SCREEN_PLAY, input: IDLE_INPUT, steps: Math.floor(4 / STEP) };
+    p.aimAngle = Math.PI / 2;
+    game.missions.index = 0;
+    game.missions.step = 0;
+    game.missions.entered = true;
+    game.police.stars = 0;
+    return;
   }
-  // Default: walk — Ray on foot downtown, the city alive around him.
-  p.x = 1500;
-  p.y = 1240;
-  p.angle = Math.PI / 2;
-  startMission(G, 0);
-  G.camera.x = p.x;
-  G.camera.y = p.y;
-  return { screen: SCREEN_PLAY, input: IDLE_INPUT, steps: Math.floor(2.5 / STEP) };
+
+  if (name === 'drive') {
+    // Ray driving up a main drag, traffic all around.
+    giveCar(game, 1500, roadCenter(3) + 27, 0, '#3e6fb0');
+    game.missions.index = 0;
+    game.missions.step = 1;
+    game.missions.entered = true;
+    game.police.stars = 0;
+    return;
+  }
+
+  if (name === 'chase') {
+    // Heat Wave: three stars, two PD cars on Ray's tail, racing east on the
+    // road past Bea's garage — the yellow beam marks the goal.
+    giveCar(game, 1500, roadCenter(2), 0, '#b0483e');
+    game.missions.index = 3;
+    game.missions.step = 1;
+    game.missions.entered = true;
+    game.missions.timer = 42;
+    game.police.stars = 3;
+    game.police.lastCrimeT = game.time;
+    addPoliceCar(game, 1380, roadCenter(2), 0);
+    addPoliceCar(game, 1300, roadCenter(2) + 50, 0);
+    game.police.cops.push({ x: 1560, y: roadCenter(2) + 90, health: 100, shootT: 0.4, flash: 0 });
+    return;
+  }
+
+  if (name === 'mission') {
+    // The Big One: cash grabbed, five stars, fleeing east on the road past
+    // the bank with the whole PD behind.
+    giveCar(game, 2500, roadCenter(4), 0, '#c9a13e');
+    game.missions.index = 5;
+    game.missions.step = 2;
+    game.missions.entered = true;
+    game.missions.grabT = 3;
+    game.police.stars = 5;
+    game.police.lastCrimeT = game.time;
+    addPoliceCar(game, 2360, roadCenter(4), 0);
+    addPoliceCar(game, 2280, roadCenter(4) + 50, 0);
+    addPoliceCar(game, 2650, roadCenter(4) + 50, Math.PI);
+    game.police.cops.push({ x: 2590, y: roadCenter(4) + 95, health: 100, shootT: 0.4, flash: 0 });
+    return;
+  }
+
+  // Unknown shot name: plain free roam.
+  p.car = null;
+  p.x = city.garage.x;
+  p.y = city.garage.y + 120;
+  void CFG;
 }
