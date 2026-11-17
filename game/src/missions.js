@@ -1,347 +1,251 @@
-// Missions and the story: six jobs from Bea, the fixer who runs the garage,
-// taking Ray from his first stolen car to the big bank job. Each mission is a
-// list of stages — go somewhere, steal something, hold a robbery, survive a
-// fight, lose the cops — and the game tracks the current objective, the
-// marker on the map, timers and payouts. Taxis are the side hustle: fares
-// appear while driving, pay cash, and never block the story.
+// Bea's story: six missions for Ray, plus taxi fares and hidden cash
+// stashes on the side. The mission control owns the objective text, the
+// map marker and the timers; the world owns the player and the cash.
 
-import { MISSION_REWARD, TAXI_FARE } from './config.js';
-import { nearestRoadPoint } from './city.js';
-import { addHeat } from './police.js';
-import { makeCar } from './vehicles.js';
-import { makePed, scarePeds } from './people.js';
-import { writeSave } from './save.js';
+import { CFG } from './config.js';
+import { randomSidewalkPoint, randomRoadPoint } from './city.js';
 
-export const MISSIONS = [
-  {
-    id: 0,
-    name: 'First Wheels',
-    brief: 'Bea needs a driver. Get to her garage, then bring her a car — any car.',
-    reward: MISSION_REWARD[0],
-    stages: [
-      { type: 'goto', text: 'Get to Bea’s Garage', place: 'garage', radius: 90 },
-      { type: 'enterCar', text: 'Steal a car (walk up and press E)' },
-      { type: 'driveTo', text: 'Drive it back to Bea’s Garage', place: 'garage', radius: 100 },
-    ],
-  },
-  {
-    id: 1,
-    name: 'The Courier',
-    brief: 'A package is waiting at the South Docks. Pick it up and take it to the bank — fast.',
-    reward: MISSION_REWARD[1],
-    stages: [
-      { type: 'goto', text: 'Pick up the package at the South Docks', place: 'docks', radius: 90 },
-      { type: 'timed', text: 'Deliver the package to Coral Bay Bank', place: 'bank', radius: 100, seconds: 100 },
-    ],
-  },
-  {
-    id: 2,
-    name: 'Quick Cash',
-    brief: 'Sunset Mart keeps its takings in a tin under the counter. Take it — then vanish.',
-    reward: MISSION_REWARD[2],
-    stages: [
-      { type: 'goto', text: 'Get to Sunset Mart', place: 'store', radius: 90 },
-      { type: 'hold', text: 'Hold the robbery — stay at the counter', place: 'store', radius: 70, seconds: 3, heat: 22 },
-      { type: 'escape', text: 'Lose the cops — or reach the Hideout', place: 'hideout', radius: 100 },
-    ],
-  },
-  {
-    id: 3,
-    name: 'Hot Wheels',
-    brief: 'A Vortex GT is parked on Palmera Beach, keys in it. Bea has a buyer. Bring it home in one piece.',
-    reward: MISSION_REWARD[3],
-    stages: [
-      { type: 'goto', text: 'Get to the Vortex GT on Palmera Beach', place: 'beach', radius: 110 },
-      { type: 'stealTarget', text: 'Take the Vortex GT (press E)' },
-      { type: 'driveTo', text: 'Deliver the Vortex GT to Bea’s Garage — don’t wreck it', place: 'garage', radius: 100, minHealth: 0.3 },
-    ],
-  },
-  {
-    id: 4,
-    name: 'Turf War',
-    brief: 'The Vultures are hitting Bea’s garage tonight. Be there. Bring the pistol.',
-    reward: MISSION_REWARD[4],
-    stages: [
-      { type: 'goto', text: 'Get to Bea’s Garage', place: 'garage', radius: 110 },
-      { type: 'survive', text: 'Defend the garage — take down the Vultures', count: 5 },
-    ],
-  },
-  {
-    id: 5,
-    name: 'The Big Score',
-    brief: 'Coral Bay Bank. Five minutes, no mistakes. After this, Ray Delgado is out — or he is legend.',
-    reward: MISSION_REWARD[5],
-    stages: [
-      { type: 'goto', text: 'Get to Coral Bay Bank', place: 'bank', radius: 100 },
-      { type: 'hold', text: 'Crack the vault — stay at the counter', place: 'bank', radius: 80, seconds: 5, heat: 45 },
-      { type: 'escape', text: 'Escape to the Hideout with the money', place: 'hideout', radius: 110 },
-    ],
-  },
+export const MISSION_DEFS = [
+  { id: 0, title: 'First Ride', brief: 'Bea: "Steal a car and bring it to my garage."' },
+  { id: 1, title: 'Cab Call', brief: 'Bea: "A fare is waiting. Pick them up, drop them off. Keep it clean."' },
+  { id: 2, title: 'The Drop', brief: 'Bea: "Grab the package on foot, then run it to the docks. The cops will be watching."' },
+  { id: 3, title: 'Heat Wave', brief: 'Bea: "Three stars on you. Survive sixty seconds, then come home."' },
+  { id: 4, title: 'Cash Stash', brief: 'Bea: "Three stashes are hidden around Coral Bay. Collect them on foot."' },
+  { id: 5, title: 'The Big One', brief: 'Bea: "The bank. Grab the cash and get out. Every cop in the city will be on you."' },
 ];
 
-export function startMission(G, id) {
-  const def = MISSIONS[id];
-  if (!def) return;
-  G.mission = {
-    def,
-    stageIndex: 0,
-    timer: 0,
-    progress: 0,
-    active: true,
-    done: false,
-    failed: false,
-    failReason: '',
-    targetCar: null,
-    gangLeft: 0,
-    spawned: false,
-  };
-  G.message = `New mission: ${def.name}`;
-  G.messageTimer = 5;
-  G.audio.pickup();
-}
-
-function placeOf(G, place) {
-  if (place === 'beach') return { x: G.city.beachX - 90, y: 1300, w: 0, h: 0 };
-  const lm = G.city.landmarks[place];
-  return lm ? { x: lm.x, y: lm.y, w: lm.w, h: lm.h } : { x: 700, y: 2000, w: 0, h: 0 };
-}
-
-/**
- * True when the player is at a place: inside the landmark's rectangle grown
- * by `radius`, so a big building counts from its front door, not its centre.
- */
-function nearPlace(G, place, radius) {
-  const t = placeOf(G, place);
-  const p = G.player;
-  const hw = t.w / 2 + radius;
-  const hh = t.h / 2 + radius;
-  return Math.abs(p.x - t.x) <= hw && Math.abs(p.y - t.y) <= hh;
-}
-
-function currentStage(G) {
-  const m = G.mission;
-  return m && m.active ? m.def.stages[m.stageIndex] : null;
-}
-
-export function currentObjective(G) {
-  const stage = currentStage(G);
-  if (stage) return stage.text;
-  if (G.taxi.phase !== 'none') {
-    return G.taxi.phase === 'pickup' ? 'Taxi fare: pick up the passenger' : 'Taxi fare: drop off the passenger';
+export class MissionControl {
+  constructor(game) {
+    this.game = game;
+    this.index = game.saveMission || 0; // 0..5, 6 = story done
+    this.step = 0;
+    this.timer = 0;
+    this.stashesGot = 0;
+    this.grabT = 0;
+    this.fare = null;      // {x, y} a waiting fare
+    this.fareRide = null;  // {x, y, t} destination and the clock
+    this.package = null;   // {x, y} the drop package
+    this.fareCooldown = 6;
+    this.activeStashes = [];
+    this.entered = false;
+    this.banner = '';
   }
-  if (G.save.missionsDone >= MISSIONS.length) return 'Story complete — free roam. Press Enter for the next job board.';
-  return 'Free roam — press Enter to start the next mission.';
-}
 
-export function currentMarker(G) {
-  const stage = currentStage(G);
-  if (stage && stage.place) {
-    const p = placeOf(G, stage.place);
-    return { x: p.x, y: p.y, kind: 'mission' };
+  get done() { return this.index >= MISSION_DEFS.length; }
+  get def() { return MISSION_DEFS[this.index]; }
+
+  startMission() {
+    this.entered = true;
+    this.step = 0;
+    this.timer = 0;
+    this.grabT = 0;
+    const g = this.game;
+    if (this.index === 1) {
+      this.fare = randomSidewalkPoint(g.city, g.rng);
+    } else if (this.index === 2) {
+      this.package = randomSidewalkPoint(g.city, g.rng);
+    } else if (this.index === 3) {
+      g.police.stars = 3;
+      g.police.lastCrimeT = g.time;
+      this.timer = 60;
+    } else if (this.index === 4) {
+      this.activeStashes = g.city.stashSpots.filter((s) => !s.taken).slice(0, 3);
+      this.stashesGot = 0;
+    }
+    this.banner = `${this.def.title} — ${this.def.brief}`;
+    g.banner = { text: this.banner, t: 5 };
+    if (g.sfx) g.sfx.jingle();
   }
-  if (stage && stage.type === 'stealTarget' && G.mission.targetCar) {
-    return { x: G.mission.targetCar.x, y: G.mission.targetCar.y, kind: 'mission' };
+
+  completeMission() {
+    const g = this.game;
+    const pay = CFG.pay.mission[this.index];
+    g.addCash(pay);
+    g.banner = { text: `Mission complete: ${this.def.title}  +$${pay}`, t: 4 };
+    if (g.sfx) g.sfx.cash();
+    this.index++;
+    this.step = 0;
+    this.entered = false;
+    this.fare = null;
+    this.fareRide = null;
+    this.package = null;
+    this.activeStashes = [];
+    g.saveProgress();
+    if (this.done) {
+      g.banner = { text: 'Coral Bay is yours, Ray. Free roam — fares and stashes still pay.', t: 6 };
+    }
   }
-  if (G.taxi.phase !== 'none') return { x: G.taxi.x, y: G.taxi.y, kind: 'taxi' };
-  return null;
-}
 
-function advanceStage(G) {
-  const m = G.mission;
-  m.stageIndex += 1;
-  m.timer = 0;
-  m.progress = 0;
-  m.spawned = false;
-  if (m.stageIndex >= m.def.stages.length) completeMission(G);
-}
-
-function failMission(G, reason) {
-  const m = G.mission;
-  m.active = false;
-  m.failed = true;
-  m.failReason = reason;
-  G.missionFailed = reason;
-  G.audio.busted();
-}
-
-function completeMission(G) {
-  const m = G.mission;
-  m.active = false;
-  m.done = true;
-  G.player.cash += m.def.reward;
-  G.save.missionsDone = Math.max(G.save.missionsDone, m.def.id + 1);
-  G.save.cash = G.player.cash;
-  writeSave(G.save);
-  G.missionComplete = m.def;
-  G.audio.missionDone();
-  G.message = `Mission complete: ${m.def.name} — $${m.def.reward} earned.`;
-  G.messageTimer = 5;
-}
-
-function spawnGang(G, count) {
-  const garage = placeOf(G, 'garage');
-  for (let i = 0; i < count; i++) {
-    const angle = (i / count) * Math.PI * 2;
-    const x = garage.x + Math.cos(angle) * 260;
-    const y = garage.y + Math.sin(angle) * 260;
-    const ped = makePed(G, x, y, { gang: true, hp: 70, color: '#1c1c22' });
-    G.peds.push(ped);
+  // The world calls this every frame with the E key's pressed state.
+  update(dt, ePressed) {
+    const g = this.game;
+    const p = g.player;
+    if (!this.entered && !this.done) this.startMission();
+    if (!this.done) this.updateStory(dt, ePressed);
+    this.updateSide(dt, ePressed);
   }
-  scarePeds(G, garage.x, garage.y, 400);
-}
 
-export function updateMission(G, dt) {
-  const m = G.mission;
-  if (!m || !m.active) return;
-  const stage = currentStage(G);
-  if (!stage) return;
-  const p = G.player;
+  updateStory(dt, ePressed) {
+    const g = this.game;
+    const p = g.player;
+    const near = (x, y, r) => Math.hypot(p.x - x, p.y - y) < r;
+    switch (this.index) {
+      case 0:
+        if (this.step === 0 && p.car) { this.step = 1; }
+        else if (this.step === 1 && p.car && near(g.city.garage.x, g.city.garage.y, 70)) this.completeMission();
+        break;
+      case 1:
+        if (this.step === 0 && this.fare && p.car && near(this.fare.x, this.fare.y, 50)) {
+          this.fareRide = { ...randomRoadPoint(g.city, g.rng), t: 90 };
+          this.fare = null;
+          this.step = 1;
+          g.banner = { text: 'Fare aboard — get them there in time.', t: 3 };
+        } else if (this.step === 1 && this.fareRide) {
+          this.fareRide.t -= dt;
+          if (near(this.fareRide.x, this.fareRide.y, 70)) {
+            g.addCash(CFG.pay.taxi);
+            g.banner = { text: `Fare delivered  +$${CFG.pay.taxi}`, t: 3 };
+            if (g.sfx) g.sfx.cash();
+            this.fareRide = null;
+            this.completeMission();
+          } else if (this.fareRide.t <= 0) {
+            g.banner = { text: 'The fare walked off. Bea is not impressed.', t: 3 };
+            this.fareRide = null;
+            this.step = 0;
+            this.fare = randomSidewalkPoint(g.city, g.rng);
+          }
+        }
+        break;
+      case 2:
+        if (this.step === 0 && this.package && !p.car && near(this.package.x, this.package.y, 36)) {
+          this.package = null;
+          this.step = 1;
+          g.police.addCrime(2, g);
+          g.banner = { text: 'Package grabbed — run it to the docks!', t: 3 };
+        } else if (this.step === 1 && near(g.city.docks.x, g.city.docks.y, 70)) {
+          this.completeMission();
+        }
+        break;
+      case 3:
+        if (this.step === 0) {
+          this.timer -= dt;
+          if (this.timer <= 0) { this.step = 1; g.banner = { text: 'You made it. Get back to the garage.', t: 3 }; }
+        } else if (this.step === 1 && near(g.city.garage.x, g.city.garage.y, 70)) {
+          this.completeMission();
+        }
+        break;
+      case 4:
+        if (this.step === 0 && this.stashesGot >= 3) this.completeMission();
+        break;
+      case 5:
+        if (this.step === 0 && near(g.city.bank.x, g.city.bank.y, 80)) {
+          this.step = 1;
+          g.banner = { text: 'Hold E to grab the cash.', t: 3 };
+        } else if (this.step === 1) {
+          if (near(g.city.bank.x, g.city.bank.y, 80) && g.eHeld) {
+            this.grabT += dt;
+            if (this.grabT >= 3) {
+              this.step = 2;
+              g.police.stars = 5;
+              g.police.lastCrimeT = g.time;
+              g.banner = { text: 'Cash grabbed! Every cop in Coral Bay is coming. RUN.', t: 4 };
+              if (g.sfx) g.sfx.cash();
+            }
+          } else {
+            this.grabT = Math.max(0, this.grabT - dt * 2);
+          }
+        } else if (this.step === 2 && near(g.city.garage.x, g.city.garage.y, 70)) {
+          this.completeMission();
+        }
+        break;
+      default:
+        break;
+    }
+    void ePressed;
+  }
 
-  if (stage.type === 'goto' || stage.type === 'driveTo' || stage.type === 'timed') {
-    if (stage.type === 'timed') {
-      m.timer += dt;
-      if (m.timer > stage.seconds) {
-        failMission(G, 'Too slow — the package went cold.');
-        return;
+  updateSide(dt, ePressed) {
+    const g = this.game;
+    const p = g.player;
+    // Cash stashes: walk over one on foot to collect it.
+    for (const s of g.city.stashSpots) {
+      if (s.taken) continue;
+      if (!p.car && Math.hypot(p.x - s.x, p.y - s.y) < 32) {
+        s.taken = true;
+        s.respawnT = 90;
+        g.addCash(CFG.pay.stash);
+        if (g.sfx) g.sfx.pickup();
+        g.banner = { text: `Cash stash  +$${CFG.pay.stash}`, t: 2.5 };
+        if (this.index === 4 && this.activeStashes.includes(s)) this.stashesGot++;
       }
     }
-    if (stage.type === 'driveTo' && stage.minHealth && m.targetCar && m.targetCar.wreck) {
-      failMission(G, 'The Vortex GT is wrecked — Bea’s buyer walked away.');
-      return;
-    }
-    if (nearPlace(G, stage.place, stage.radius)) {
-      if (stage.type === 'driveTo' && !p.car) {
-        G.message = 'You need to be in the car for the delivery.';
-        G.messageTimer = 2;
-        return;
+    for (const s of g.city.stashSpots) {
+      if (s.taken && s.respawnT !== undefined) {
+        s.respawnT -= dt;
+        if (s.respawnT <= 0) { s.taken = false; s.respawnT = undefined; }
       }
-      advanceStage(G);
     }
-    return;
-  }
-
-  if (stage.type === 'enterCar') {
-    if (p.car) advanceStage(G);
-    return;
-  }
-
-  if (stage.type === 'stealTarget') {
-    if (!m.targetCar) {
-      const beach = placeOf(G, 'beach');
-      const car = makeCar('sports', beach.x, beach.y - 40, Math.PI / 2, 'parked');
-      car.driver = false;
-      G.cars.push(car);
-      m.targetCar = car;
+    // Taxi fares after the cab mission: a fare waits, E picks them up.
+    this.fareCooldown -= dt;
+    if (this.index >= 2 && !this.fare && !this.fareRide && this.fareCooldown <= 0 && p.car) {
+      const pt = randomSidewalkPoint(g.city, g.rng);
+      if (Math.hypot(pt.x - p.x, pt.y - p.y) < 800) this.fare = pt;
+      else this.fareCooldown = 3;
     }
-    if (p.car === m.targetCar) {
-      addHeat(G, 12, 'stole the Vortex');
-      G.message = 'The Vortex GT is yours. Get it to Bea’s — in one piece.';
-      G.messageTimer = 3;
-      advanceStage(G);
+    if (this.fare && p.car && Math.hypot(p.x - this.fare.x, p.y - this.fare.y) < 50 && ePressed) {
+      this.fareRide = { ...randomRoadPoint(g.city, g.rng), t: 75 };
+      this.fare = null;
+      g.banner = { text: 'Fare aboard — get them there in time.', t: 3 };
     }
-    return;
-  }
-
-  if (stage.type === 'hold') {
-    if (nearPlace(G, stage.place, stage.radius) && p.onFoot) {
-      m.progress += dt;
-      if (m.progress >= stage.seconds) {
-        addHeat(G, stage.heat, 'robbery');
-        G.message = 'Got it! Now run — the cops are coming.';
-        G.messageTimer = 3;
-        advanceStage(G);
+    if (this.fareRide) {
+      this.fareRide.t -= dt;
+      if (Math.hypot(p.x - this.fareRide.x, p.y - this.fareRide.y) < 70) {
+        g.addCash(CFG.pay.taxi);
+        g.banner = { text: `Fare delivered  +$${CFG.pay.taxi}`, t: 3 };
+        if (g.sfx) g.sfx.cash();
+        this.fareRide = null;
+        this.fareCooldown = 10;
+      } else if (this.fareRide.t <= 0) {
+        g.banner = { text: 'The fare gave up waiting.', t: 3 };
+        this.fareRide = null;
+        this.fareCooldown = 12;
       }
-    } else {
-      m.progress = Math.max(0, m.progress - dt * 0.5);
     }
-    return;
   }
 
-  if (stage.type === 'survive') {
-    if (!m.spawned) {
-      m.spawned = true;
-      spawnGang(G, stage.count);
-      m.gangLeft = stage.count;
-      G.message = 'The Vultures are here! Defend the garage!';
-      G.messageTimer = 4;
+  objectiveText() {
+    if (this.done) return 'Free roam — fares and stashes still pay.';
+    switch (this.index) {
+      case 0: return this.step === 0 ? 'Steal a car (E near a car)' : 'Drive it to Bea\'s garage';
+      case 1: return this.step === 0 ? 'Pick up the fare' : `Drop the fare off — ${Math.ceil(this.fareRide?.t ?? 0)}s left`;
+      case 2: return this.step === 0 ? 'Grab the package on foot' : 'Run the package to the docks';
+      case 3: return this.step === 0 ? `Survive the heat — ${Math.ceil(this.timer)}s` : 'Get back to Bea\'s garage';
+      case 4: return `Collect the stashes — ${this.stashesGot}/3`;
+      case 5:
+        if (this.step === 0) return 'Get to the bank';
+        if (this.step === 1) return 'Hold E to grab the cash';
+        return 'Escape to Bea\'s garage — 5 stars!';
+      default: return '';
     }
-    const left = G.peds.filter((ped) => ped.gang && ped.state !== 'down').length;
-    m.gangLeft = left;
-    if (left === 0) advanceStage(G);
-    return;
   }
 
-  if (stage.type === 'escape') {
-    if (p.wantedHeat <= 0.5) {
-      G.message = 'Clean getaway. The heat is off.';
-      G.messageTimer = 3;
-      advanceStage(G);
-      return;
-    }
-    if (nearPlace(G, stage.place, stage.radius)) {
-      p.wantedHeat = 0;
-      G.policeCars.forEach((c) => {
-        c.siren = false;
-      });
-      G.policeCars = [];
-      G.cops = [];
-      advanceStage(G);
-    }
-    return;
-  }
-}
-
-/** Fail the active mission when the player is wasted or busted. */
-export function failMissionOnArrest(G, reason) {
-  if (G.mission && G.mission.active) failMission(G, reason);
-}
-
-// ---------------------------------------------------------------- taxis
-
-export function updateTaxi(G, dt) {
-  const taxi = G.taxi;
-  if (taxi.phase === 'none') {
-    taxi.cooldown -= dt;
-    // A fare appears while the player drives around with no mission running.
-    if (taxi.cooldown <= 0 && G.player.car && (!G.mission || !G.mission.active)) {
-      taxi.cooldown = 40;
-      const p = nearestRoadPoint(G.city, G.player.x + G.rng.range(-500, 500), G.player.y + G.rng.range(-500, 500));
-      taxi.phase = 'pickup';
-      taxi.x = p.x;
-      taxi.y = p.y;
-      taxi.timer = 45;
-      taxi.fare = G.rng.pick(TAXI_FARE);
-      G.message = 'Taxi fare nearby — pick up the passenger for cash.';
-      G.messageTimer = 3;
-    }
-    return;
-  }
-  taxi.timer -= dt;
-  if (taxi.timer <= 0) {
-    taxi.phase = 'none';
-    taxi.cooldown = 25;
-    G.message = 'The fare gave up waiting.';
-    G.messageTimer = 2;
-    return;
-  }
-  const d = Math.hypot(G.player.x - taxi.x, G.player.y - taxi.y);
-  if (d < 70 && G.player.car) {
-    if (taxi.phase === 'pickup') {
-      taxi.phase = 'dropoff';
-      const dest = nearestRoadPoint(G.city, G.player.x + G.rng.range(-900, 900), G.player.y + G.rng.range(-900, 900));
-      taxi.x = dest.x;
-      taxi.y = dest.y;
-      taxi.timer = 60;
-      G.message = 'Passenger aboard — take them to the marker.';
-      G.messageTimer = 3;
-    } else {
-      G.player.cash += taxi.fare;
-      G.save.cash = G.player.cash;
-      G.audio.cash();
-      G.message = `Fare complete — $${taxi.fare} earned.`;
-      G.messageTimer = 3;
-      taxi.phase = 'none';
-      taxi.cooldown = 30;
+  // The current map marker, or null when there is none.
+  marker() {
+    if (this.fareRide) return { x: this.fareRide.x, y: this.fareRide.y, kind: 'ride' };
+    if (this.done) return this.fare ? { x: this.fare.x, y: this.fare.y, kind: 'fare' } : null;
+    switch (this.index) {
+      case 0: return this.step === 1 ? { x: this.game.city.garage.x, y: this.game.city.garage.y, kind: 'garage' } : null;
+      case 1: return this.step === 0 && this.fare ? { x: this.fare.x, y: this.fare.y, kind: 'fare' } : null;
+      case 2: return this.step === 0 && this.package ? { x: this.package.x, y: this.package.y, kind: 'package' } : { x: this.game.city.docks.x, y: this.game.city.docks.y, kind: 'docks' };
+      case 3: return this.step === 1 ? { x: this.game.city.garage.x, y: this.game.city.garage.y, kind: 'garage' } : null;
+      case 4: {
+        const s = this.activeStashes.find((sp) => !sp.taken);
+        return s ? { x: s.x, y: s.y, kind: 'stash' } : null;
+      }
+      case 5:
+        if (this.step === 0 || this.step === 1) return { x: this.game.city.bank.x, y: this.game.city.bank.y, kind: 'bank' };
+        return { x: this.game.city.garage.x, y: this.game.city.garage.y, kind: 'garage' };
+      default: return null;
     }
   }
 }

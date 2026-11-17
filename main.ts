@@ -1,6 +1,6 @@
-// Coral Bay: Hot Streets — the entrypoint. It gathers the playable game and
-// its screenshots into the hand-in directory and asks the vendored make.fun
-// library to write the dossier the judge reads.
+// Coral Bay: Hot Streets — the hand-in program. It gathers the playable
+// game and its screenshots into the output directory and asks the vendored
+// make.fun library to write the dossier the judge reads.
 //
 //   Node 22, standard library only; nothing is installed or downloaded.
 //   Run it from the repository root:
