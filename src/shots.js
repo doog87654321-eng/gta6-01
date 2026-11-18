@@ -29,6 +29,12 @@ function addPoliceCar(game, x, y, angle) {
 export function stageShot(game, name) {
   const city = game.city;
   const p = game.player;
+  // A staged scene always starts clean: full health, a full magazine and
+  // no leftover particles, whatever ran before it.
+  p.health = CFG.player.health;
+  p.ammo = CFG.player.mag;
+  p.reloading = false;
+  game.particles.length = 0;
   game.state = 'playing';
   game.cam.x = 0; game.cam.y = 0;
 
@@ -98,5 +104,4 @@ export function stageShot(game, name) {
   p.car = null;
   p.x = city.garage.x;
   p.y = city.garage.y + 120;
-  void CFG;
 }

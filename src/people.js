@@ -146,6 +146,13 @@ export class Traffic {
     // Top the traffic back up when the player steals a car.
     while (this.list.length < CFG.traffic.count) this.list.push(this.spawn());
     for (const c of this.list) {
+      // A car shot to a stop stalls for a few seconds, then pulls away
+      // again instead of blocking the road forever.
+      if (c.speed === 0) {
+        c.stallT = (c.stallT ?? 3) - dt;
+        if (c.stallT <= 0) { c.speed = this.rng.range(CFG.traffic.speedMin, CFG.traffic.speedMax); c.stallT = undefined; }
+        continue;
+      }
       c.pos += c.dir * c.speed * dt;
       for (const cross of city.roads) {
         if (Math.abs(c.pos - cross) < 6 && this.rng.chance(CFG.traffic.turnChance * dt * 10)) {

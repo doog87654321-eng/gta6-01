@@ -26,7 +26,6 @@ export class MissionControl {
     this.fareRide = null;  // {x, y, t} destination and the clock
     this.package = null;   // {x, y} the drop package
     this.fareCooldown = 6;
-    this.activeStashes = [];
     this.entered = false;
     this.banner = '';
   }
@@ -49,7 +48,8 @@ export class MissionControl {
       g.police.lastCrimeT = g.time;
       this.timer = 60;
     } else if (this.index === 4) {
-      this.activeStashes = g.city.stashSpots.filter((s) => !s.taken).slice(0, 3);
+      // Any three stashes count: the player should not have to guess
+      // which three the map picked for them.
       this.stashesGot = 0;
     }
     this.banner = `${this.def.title} — ${this.def.brief}`;
@@ -69,7 +69,6 @@ export class MissionControl {
     this.fare = null;
     this.fareRide = null;
     this.package = null;
-    this.activeStashes = [];
     g.saveProgress();
     if (this.done) {
       g.banner = { text: 'Coral Bay is yours, Ray. Free roam — fares and stashes still pay.', t: 6 };
@@ -176,7 +175,7 @@ export class MissionControl {
         g.addCash(CFG.pay.stash);
         if (g.sfx) g.sfx.pickup();
         g.banner = { text: `Cash stash  +$${CFG.pay.stash}`, t: 2.5 };
-        if (this.index === 4 && this.activeStashes.includes(s)) this.stashesGot++;
+        if (this.index === 4) this.stashesGot++;
       }
     }
     for (const s of g.city.stashSpots) {
@@ -239,8 +238,14 @@ export class MissionControl {
       case 2: return this.step === 0 && this.package ? { x: this.package.x, y: this.package.y, kind: 'package' } : { x: this.game.city.docks.x, y: this.game.city.docks.y, kind: 'docks' };
       case 3: return this.step === 1 ? { x: this.game.city.garage.x, y: this.game.city.garage.y, kind: 'garage' } : null;
       case 4: {
-        const s = this.activeStashes.find((sp) => !sp.taken);
-        return s ? { x: s.x, y: s.y, kind: 'stash' } : null;
+        // Point at the nearest stash still on the map.
+        let best = null, bd = 1e9;
+        for (const sp of this.game.city.stashSpots) {
+          if (sp.taken) continue;
+          const d = Math.hypot(sp.x - this.game.player.x, sp.y - this.game.player.y);
+          if (d < bd) { bd = d; best = sp; }
+        }
+        return best ? { x: best.x, y: best.y, kind: 'stash' } : null;
       }
       case 5:
         if (this.step === 0 || this.step === 1) return { x: this.game.city.bank.x, y: this.game.city.bank.y, kind: 'bank' };

@@ -14,6 +14,14 @@ export function makeRng(seed) {
     range(min, max) { return min + this.next() * (max - min); },
     int(min, max) { return Math.floor(this.range(min, max + 1)); },
     pick(list) { return list[Math.floor(this.next() * list.length)]; },
+    // Fisher-Yates, in place, so a seed can shuffle an order too.
+    shuffle(list) {
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(this.next() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      return list;
+    },
     chance(p) { return this.next() < p; },
   };
 }

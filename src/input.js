@@ -1,5 +1,5 @@
 // Keyboard and mouse state. Keys are tracked by code (KeyW, ArrowUp, KeyE,
-// Space, ShiftLeft, Escape, KeyR, KeyM, KeyT). `pressed` holds the codes
+// Space, ShiftLeft, Escape, KeyR, KeyM, KeyH). `pressed` holds the codes
 // that went down since the last frame — the loop clears it every frame.
 
 export const keys = new Set();
@@ -13,7 +13,9 @@ export function attachInput(canvas) {
     keys.add(e.code);
   });
   window.addEventListener('keyup', (e) => keys.delete(e.code));
-  window.addEventListener('blur', () => keys.clear());
+  // Losing the window must also drop the mouse, or a click held through
+  // an alt-tab keeps firing after the player comes back.
+  window.addEventListener('blur', () => { keys.clear(); mouse.down = false; mouse.clicked = false; });
   canvas.addEventListener('mousemove', (e) => {
     const r = canvas.getBoundingClientRect();
     mouse.x = (e.clientX - r.left) * (canvas.width / r.width);

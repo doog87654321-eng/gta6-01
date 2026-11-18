@@ -57,8 +57,9 @@ export const CFG = {
   },
 
   police: {
-    // stars -> how many police cars hunt the player
-    carsByStars: [0, 1, 2, 2, 3, 4],
+    // stars -> how many police cars hunt the player. Five stars is the
+    // bank-job escape, so it gets one more car than the four before.
+    carsByStars: [0, 1, 2, 2, 3, 5],
     carSpeed: 470,
     footSpeed: 152,
     ramDamage: 14,

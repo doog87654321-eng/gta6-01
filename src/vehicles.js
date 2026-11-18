@@ -104,6 +104,8 @@ export class Car {
   // Drive with W/S (gas/brake/reverse) and A/D (steer). Returns the speed
   // change so the caller can play crash sounds on hard hits.
   drive(dt, city, others) {
+    // A wrecked car stays wrecked: no throttle, no steering, no drift.
+    if (this.wrecked) { this.speed = 0; return this.speed; }
     const k = CFG.car;
     let throttle = 0, steer = 0;
     if (this._gas) throttle += 1;
@@ -123,14 +125,12 @@ export class Car {
     this.angle += steer * k.turn * grip * dt * (this.speed >= 0 ? 1 : -1);
     const nx = this.x + Math.cos(this.angle) * this.speed * dt;
     const ny = this.y + Math.sin(this.angle) * this.speed * dt;
-    const before = { x: this.x, y: this.y };
     this.x = nx; this.y = ny;
     const hitWall = resolveCircle(this._city || city, this, 20);
     if (hitWall && Math.abs(this.speed) > 180) {
       this.health -= Math.abs(this.speed) * 0.03;
       this.speed *= 0.45;
     }
-    void before;
     // Bump into other cars.
     for (const o of others || []) {
       if (o === this || o.wrecked) continue;

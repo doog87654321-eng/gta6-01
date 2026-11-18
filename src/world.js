@@ -193,6 +193,8 @@ export class Game {
     // Escape is handled in main.js (it must work while paused too).
 
     if (wasPressed('KeyM')) this.sfx.setMuted(!this.sfx.muted);
+    // H honks the horn while driving.
+    if (wasPressed('KeyH') && p.car && this.sfx) this.sfx.horn();
     if (wasPressed('KeyE')) {
       if (p.car) this.exitCar();
       else this.enterCar();
