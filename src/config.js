@@ -1,100 +1,88 @@
-// Coral Bay: Hot Streets — tuning constants and the palette.
-// Everything the game needs to know about size, speed and colour lives here,
-// so the other modules stay small and the numbers can be tuned in one place.
+// Coral Bay: Hot Streets — every tuning number and the palette, in one place.
+// The city is an 8x8 block grid. Roads run on a 300px pitch; land is
+// 2400x2400, then a beach strip and the sea to the east.
 
 export const CFG = {
-  viewW: 1280,
-  viewH: 720,
+  // World geometry (px)
+  PITCH: 300,          // block pitch: road centre to road centre
+  ROAD_W: 64,          // road width
+  BLOCKS: 8,           // blocks per side
+  LAND: 2400,          // land extent (0..2400 on both axes)
+  BEACH_W: 170,        // sand strip east of the land
+  SEA_W: 470,          // sea east of the beach
+  WORLD_W: 3040,       // LAND + BEACH_W + SEA_W
+  WORLD_H: 2400,
 
-  // City geometry: 8x8 blocks, 300 px blocks, 110 px roads, 410 px pitch.
-  blocks: 8,
-  block: 300,
-  road: 110,
-  pitch: 410,
-  // Land is 3390 px square; a sand strip and open water wrap the south and
-  // east edges, so the full world is 3600 px square.
-  land: 3390,
-  world: 3600,
-  beach: 170,
+  // Player on foot
+  WALK_SPEED: 175,
+  RUN_SPEED: 265,
+  PLAYER_R: 13,
+  PLAYER_HP: 100,
 
-  player: {
-    radius: 14,
-    walk: 155,
-    run: 245,
-    health: 100,
-    mag: 12,
-    reloadTime: 1.15,
-    shotRange: 430,
-    shotDamage: 34,
-    regenDelay: 5,
-    regenRate: 9,
-  },
+  // Cars
+  CAR_LEN: 46,
+  CAR_WID: 22,
+  CAR_ACCEL: 430,
+  CAR_REVERSE: 210,
+  CAR_MAX: 540,
+  CAR_BRAKE: 700,
+  CAR_FRICTION: 260,
+  ENTER_DIST: 64,
 
-  car: {
-    length: 64,
-    width: 32,
-    accel: 520,
-    brake: 760,
-    reverseMax: 190,
-    maxSpeed: 540,
-    turn: 2.7,
-    grip: 0.86,
-    health: 100,
-  },
+  // Combat
+  MAG: 12,
+  RELOAD_S: 1.1,
+  SHOT_RANGE: 620,
+  SHOT_DMG: 34,
+  PED_HP: 34,
+  COP_HP: 68,
 
-  traffic: {
-    count: 34,
-    speedMin: 70,
-    speedMax: 125,
-    turnChance: 0.3,
-  },
+  // Wanted
+  WANTED_DECAY_S: 20,  // quiet seconds before a star fades
+  COP_RAM_DMG: 9,
+  ARREST_S: 1.5,       // seconds a foot cop must hold you to bust you
 
-  peds: {
-    count: 30,
-    walkMin: 26,
-    walkMax: 48,
-    fleeSpeed: 130,
-  },
+  // Traffic / pedestrians
+  TRAFFIC_N: 34,
+  PED_N: 30,
 
-  police: {
-    // stars -> how many police cars hunt the player. Five stars is the
-    // bank-job escape, so it gets one more car than the four before.
-    carsByStars: [0, 1, 2, 2, 3, 5],
-    carSpeed: 470,
-    footSpeed: 152,
-    ramDamage: 14,
-    copShotDamage: 9,
-    copShotRange: 380,
-    copShotInterval: 0.95,
-    arrestRadius: 26,
-    decayQuiet: 20,
-    decayStep: 10,
-  },
+  // Missions
+  STASH_N: 8,
+  STASH_CASH: 100,
+  TAXI_FARE: 120,
 
-  wanted: {
-    stealCar: 1,
-    shoot: 1,
-    kill: 1,
-    maxStars: 5,
-  },
-
-  palette: {
-    road: '#2b2f36',
-    roadEdge: '#3a3f47',
-    lane: '#c8b45a',
-    sidewalk: '#8d9299',
-    sidewalkEdge: '#6f747c',
-    grass: '#5f9e52',
-    plaza: '#b9a684',
+  // Palette
+  COL: {
+    sea: '#1d6f8e',
+    seaDeep: '#155a75',
     sand: '#e3cd96',
-    waterDeep: '#14608f',
-    waterShallow: '#2b8ab5',
-    buildingRoof: ['#b0563f', '#4f7fa8', '#7a6a9e', '#a8854f', '#5d8a6a', '#96604f', '#5f7f96', '#a05a6a'],
-    buildingEdge: '#2c2f36',
-    parkTree: '#2f7a3d',
-    palm: '#3f9150',
+    grass: '#5f9e52',
+    park: '#4c8a44',
+    road: '#33373d',
+    roadEdge: '#4a4f56',
+    dash: '#d8c95a',
+    sidewalk: '#9aa0a3',
+    building: ['#b5673f', '#7d8aa0', '#a08a5f', '#6f7f6a', '#96605f', '#5f7d8a', '#8a6f9e', '#7a9e6f'],
+    roof: ['#8a4f30', '#5f6d80', '#7d6a45', '#55684f', '#75484a', '#4a6270', '#6d5680', '#5f7d55'],
+    player: '#f2c14e',
+    playerCar: '#e2483d',
+    copCar: '#2b5cb8',
+    cop: '#27408b',
+    taxi: '#f2c230',
+    ped: ['#d97b6c', '#7fb3d5', '#a8c686', '#d5a6bd', '#8fb8a8', '#e0a458'],
+    stash: '#ffd94a',
+    marker: '#ffd94a',
+    text: '#f4f1e6',
+    hudBg: 'rgba(12,16,20,0.62)',
   },
-
-  // Story payouts, in dollars.
-  pay: { mission: [300, 250, 500, 600, 400, 2000], taxi: 120, stash: 100 },
 };
+
+// Mission script: one entry per Bea job. The mission module drives these.
+export const MISSIONS = [
+  { id: 0, name: 'First Ride', brief: 'Steal any car. Walk up to one and press E.', reward: 150 },
+  { id: 1, name: 'Taxi Fare', brief: 'Pick up the fare at the marker, then drive them to the drop-off.', reward: 200 },
+  { id: 2, name: 'Package Drop', brief: 'Take the package to the docks, south edge of the city.', reward: 250 },
+  { id: 3, name: 'Heat Wave', brief: 'Reach 3 stars and stay hot for 60 seconds.', reward: 400 },
+  { id: 4, name: 'Stash Run', brief: 'Collect 3 hidden cash stashes around the city.', reward: 350 },
+  { id: 5, name: 'The Coral Bank Job', brief: 'Hit the Coral Bank, grab the cash, and lose the heat at the garage.', reward: 1500 },
+];

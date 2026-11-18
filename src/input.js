@@ -1,36 +1,72 @@
-// Keyboard and mouse state. Keys are tracked by code (KeyW, ArrowUp, KeyE,
-// Space, ShiftLeft, Escape, KeyR, KeyM, KeyH). `pressed` holds the codes
-// that went down since the last frame — the loop clears it every frame.
+// Keyboard and mouse state. Keys are tracked by code (KeyW, ArrowUp, ...)
+// and edge presses (pressed once, then consumed) are exposed for actions
+// like E, R, Escape and H.
 
-export const keys = new Set();
-export const pressedKeys = new Set();
-export const mouse = { x: 0, y: 0, down: false, clicked: false };
+export function createInput(canvas) {
+  const keys = new Set();
+  const justPressed = new Set();
+  const mouse = { x: 0, y: 0, down: false, clicked: false };
 
-export function attachInput(canvas) {
-  window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
-    if (!e.repeat) pressedKeys.add(e.code);
+  function onKeyDown(e) {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+      e.preventDefault();
+    }
+    if (!keys.has(e.code)) justPressed.add(e.code);
     keys.add(e.code);
-  });
-  window.addEventListener('keyup', (e) => keys.delete(e.code));
-  // Losing the window must also drop the mouse, or a click held through
-  // an alt-tab keeps firing after the player comes back.
-  window.addEventListener('blur', () => { keys.clear(); mouse.down = false; mouse.clicked = false; });
-  canvas.addEventListener('mousemove', (e) => {
+  }
+  function onKeyUp(e) {
+    keys.delete(e.code);
+  }
+  function onMouseMove(e) {
     const r = canvas.getBoundingClientRect();
     mouse.x = (e.clientX - r.left) * (canvas.width / r.width);
     mouse.y = (e.clientY - r.top) * (canvas.height / r.height);
-  });
-  canvas.addEventListener('mousedown', (e) => {
+  }
+  function onMouseDown(e) {
+    onMouseMove(e);
     mouse.down = true;
     mouse.clicked = true;
-    const r = canvas.getBoundingClientRect();
-    mouse.x = (e.clientX - r.left) * (canvas.width / r.width);
-    mouse.y = (e.clientY - r.top) * (canvas.height / r.height);
-  });
-  window.addEventListener('mouseup', () => { mouse.down = false; });
-}
+  }
+  function onMouseUp() {
+    mouse.down = false;
+  }
+  function onBlur() {
+    keys.clear();
+    mouse.down = false;
+  }
 
-export function isDown(code) { return keys.has(code); }
-export function wasPressed(code) { return pressedKeys.has(code); }
-export function endFrame() { pressedKeys.clear(); mouse.clicked = false; }
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', onBlur);
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mouseup', onMouseUp);
+
+  return {
+    keys,
+    mouse,
+    down(code) {
+      return keys.has(code);
+    },
+    // true once per physical press; call once per frame per action
+    pressed(code) {
+      return justPressed.has(code);
+    },
+    // WASD / arrows as a -1..1 axis pair
+    axis() {
+      const x = (this.down('KeyD') || this.down('ArrowRight') ? 1 : 0)
+        - (this.down('KeyA') || this.down('ArrowLeft') ? 1 : 0);
+      const y = (this.down('KeyS') || this.down('ArrowDown') ? 1 : 0)
+        - (this.down('KeyW') || this.down('ArrowUp') ? 1 : 0);
+      return { x, y };
+    },
+    running() {
+      return this.down('ShiftLeft') || this.down('ShiftRight');
+    },
+    // call at the end of each frame
+    endFrame() {
+      justPressed.clear();
+      mouse.clicked = false;
+    },
+  };
+}

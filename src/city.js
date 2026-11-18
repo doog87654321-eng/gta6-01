@@ -1,160 +1,170 @@
-// Coral Bay itself: a road grid, buildings, a park, a beach and the water.
-// Everything here is pure layout — no drawing, no game logic — so the world
-// module can ask "is this point on a road / inside a building / in the sea".
+// The city of Coral Bay, built once from a fixed seed so every run shows
+// the same streets: an 8x8 block grid, a park in the middle, a beach and
+// the sea to the east, the docks at the south edge, Bea's garage and the
+// Coral Bank as landmarks.
 
 import { CFG } from './config.js';
+import { makeRng } from './rng.js';
 
-// Road i spans [i * pitch, i * pitch + road]; its centre is i * pitch + road/2.
-export function roadCenter(i) { return i * CFG.pitch + CFG.road / 2; }
+const { PITCH, ROAD_W, BLOCKS, LAND, BEACH_W, SEA_W, WORLD_W, WORLD_H } = CFG;
+const HALF = ROAD_W / 2;
+
+function roadBand(v) {
+  // distance from v to the nearest road centreline (multiples of PITCH)
+  const m = ((v % PITCH) + PITCH) % PITCH;
+  return Math.min(m, PITCH - m);
+}
+
+export function isRoad(x, y) {
+  if (x < 0 || y < 0 || x >= LAND || y >= LAND) return false;
+  return roadBand(x) <= HALF || roadBand(y) <= HALF;
+}
+
+export function onSidewalk(x, y) {
+  if (x < 0 || y < 0 || x >= LAND || y >= LAND) return false;
+  const d = Math.min(roadBand(x), roadBand(y));
+  return d > HALF && d <= HALF + 16;
+}
 
 export function buildCity(seed) {
-  const rng = seed;
-  const city = {
-    size: CFG.world,
-    land: CFG.land,
-    roads: [],
-    buildings: [],
-    trees: [],
-    park: null,
-    garage: null,
-    bank: null,
-    docks: null,
-    stashSpots: [],
-  };
-  for (let i = 0; i <= CFG.blocks; i++) city.roads.push(roadCenter(i));
+  const rng = makeRng(seed);
+  const buildings = [];
+  const trees = [];
+  const stashes = [];
 
-  const parkBlock = { bx: 1, by: 6 };
-  const garageBlock = { bx: 4, by: 1 };
-  const bankBlock = { bx: 6, by: 3 };
+  // Park: blocks (2..3, 2..3) stay open, with trees.
+  const isPark = (bx, by) => bx >= 2 && bx <= 3 && by >= 2 && by <= 3;
+  // Docks: blocks (6..7, 7) stay open as a pier yard.
+  const isDocks = (bx, by) => by === 7 && bx >= 6;
 
-  for (let by = 0; by < CFG.blocks; by++) {
-    for (let bx = 0; bx < CFG.blocks; bx++) {
-      const x0 = bx * CFG.pitch + CFG.road;
-      const y0 = by * CFG.pitch + CFG.road;
-      if (bx === parkBlock.bx && by === parkBlock.by) {
-        city.park = { x: x0, y: y0, w: CFG.block, h: CFG.block };
+  for (let bx = 0; bx < BLOCKS; bx++) {
+    for (let by = 0; by < BLOCKS; by++) {
+      const x0 = bx * PITCH + HALF;
+      const y0 = by * PITCH + HALF;
+      const w = PITCH - ROAD_W;
+      const h = PITCH - ROAD_W;
+      if (isPark(bx, by)) {
         for (let t = 0; t < 14; t++) {
-          city.trees.push({ x: x0 + 30 + rng.range(0, CFG.block - 60), y: y0 + 30 + rng.range(0, CFG.block - 60), r: rng.range(9, 15) });
+          trees.push({
+            x: x0 + rng.range(24, w - 24),
+            y: y0 + rng.range(24, h - 24),
+            r: rng.range(9, 15),
+          });
         }
         continue;
       }
-      const color = rng.pick(CFG.palette.buildingRoof);
-      const inset = 22;
-      if (bx === garageBlock.bx && by === garageBlock.by) {
-        city.buildings.push({ x: x0 + inset, y: y0 + inset, w: CFG.block - inset * 2, h: CFG.block - inset * 2, color: '#8a6f3c', kind: 'garage' });
-        city.garage = { x: x0 + CFG.block / 2, y: y0 + CFG.block + CFG.road / 2 };
-        continue;
-      }
-      if (bx === bankBlock.bx && by === bankBlock.by) {
-        city.buildings.push({ x: x0 + inset, y: y0 + inset, w: CFG.block - inset * 2, h: CFG.block - inset * 2, color: '#4f6f8a', kind: 'bank' });
-        city.bank = { x: x0 + CFG.block / 2, y: y0 + CFG.block + CFG.road / 2 };
-        continue;
-      }
-      if (rng.chance(0.55)) {
-        city.buildings.push({ x: x0 + inset, y: y0 + inset, w: CFG.block - inset * 2, h: CFG.block - inset * 2, color, kind: 'block' });
-      } else if (rng.chance(0.5)) {
-        const w = (CFG.block - inset * 2 - 16) / 2;
-        city.buildings.push({ x: x0 + inset, y: y0 + inset, w, h: CFG.block - inset * 2, color, kind: 'block' });
-        city.buildings.push({ x: x0 + inset + w + 16, y: y0 + inset, w, h: CFG.block - inset * 2, color: rng.pick(CFG.palette.buildingRoof), kind: 'block' });
+      if (isDocks(bx, by)) continue;
+      // One or two buildings per block, inset from the road.
+      const n = rng.chance(0.45) ? 2 : 1;
+      if (n === 1) {
+        const bw = rng.range(w * 0.45, w * 0.72);
+        const bh = rng.range(h * 0.45, h * 0.72);
+        const ci = rng.int(0, CFG.COL.building.length - 1);
+        buildings.push({
+          x: x0 + (w - bw) / 2, y: y0 + (h - bh) / 2, w: bw, h: bh,
+          color: CFG.COL.building[ci], roof: CFG.COL.roof[ci],
+        });
       } else {
-        const h = (CFG.block - inset * 2 - 16) / 2;
-        city.buildings.push({ x: x0 + inset, y: y0 + inset, w: CFG.block - inset * 2, h, color, kind: 'block' });
-        city.buildings.push({ x: x0 + inset, y: y0 + inset + h + 16, w: CFG.block - inset * 2, h, color: rng.pick(CFG.palette.buildingRoof), kind: 'block' });
+        const bw = w * 0.42;
+        const bh = h * 0.42;
+        const c1 = rng.int(0, CFG.COL.building.length - 1);
+        const c2 = rng.int(0, CFG.COL.building.length - 1);
+        buildings.push({
+          x: x0 + 8, y: y0 + 8, w: bw, h: bh,
+          color: CFG.COL.building[c1], roof: CFG.COL.roof[c1],
+        });
+        buildings.push({
+          x: x0 + w - 8 - bw, y: y0 + h - 8 - bh, w: bw, h: bh,
+          color: CFG.COL.building[c2], roof: CFG.COL.roof[c2],
+        });
       }
     }
   }
 
-  // The docks: a marker on the east beach, where the drop goes.
-  city.docks = { x: CFG.land + CFG.beach / 2, y: roadCenter(4) };
+  // Landmarks: the bank (block 4,4) and Bea's garage (block 1,6).
+  const bank = { x: 4 * PITCH + HALF + 30, y: 4 * PITCH + HALF + 30, w: 150, h: 120 };
+  const garage = { x: 1 * PITCH + HALF + 40, y: 6 * PITCH + HALF + 40, w: 140, h: 100 };
+  buildings.push({ ...bank, color: '#c8b06a', roof: '#8a743a', landmark: 'bank' });
+  buildings.push({ ...garage, color: '#5f7d8a', roof: '#3f5a66', landmark: 'garage' });
+  const docks = { x: 6 * PITCH + HALF, y: 7 * PITCH + HALF, w: 2 * PITCH - ROAD_W, h: PITCH - ROAD_W };
 
-  // Palm trees along both beaches.
-  for (let i = 0; i < 16; i++) {
-    city.trees.push({ x: 120 + i * 210 + rng.range(-40, 40), y: CFG.land + CFG.beach / 2 + rng.range(-30, 30), r: 12, palm: true });
-    city.trees.push({ x: CFG.land + CFG.beach / 2 + rng.range(-30, 30), y: 120 + i * 210 + rng.range(-40, 40), r: 12, palm: true });
+  // 8 cash stashes: on sidewalks and in the park, never inside a building.
+  const stashSpots = [];
+  let guard = 0;
+  while (stashSpots.length < CFG.STASH_N && guard++ < 400) {
+    const x = rng.range(80, LAND - 80);
+    const y = rng.range(80, LAND - 80);
+    if (isRoad(x, y)) continue;
+    if (pointInBuilding(buildings, x, y, 24)) continue;
+    if (stashSpots.some((s) => Math.hypot(s.x - x, s.y - y) < 320)) continue;
+    stashSpots.push({ x, y, taken: false });
   }
+  stashes.push(...stashSpots);
 
-  // Hidden cash stashes: quiet corners of the map.
-  const stash = [
-    [roadCenter(1) + 120, roadCenter(0) + 40],
-    [roadCenter(7) - 60, roadCenter(2) + 200],
-    [roadCenter(2) + 40, roadCenter(7) - 90],
-    [roadCenter(5) + 180, roadCenter(5) + 60],
-    [roadCenter(0) + 200, roadCenter(4) + 120],
-    [roadCenter(3) - 140, roadCenter(6) + 30],
-    [CFG.land + 60, roadCenter(6)],
-    [roadCenter(8) - 120, roadCenter(1) + 240],
-  ];
-  for (const [x, y] of stash) city.stashSpots.push({ x, y, taken: false });
-  // The order varies by seed, so the three mission stashes are not always
-  // the same three corners of the map.
-  rng.shuffle(city.stashSpots);
-
-  return city;
+  return {
+    buildings,
+    trees,
+    stashes,
+    park: { x: 2 * PITCH + HALF, y: 2 * PITCH + HALF, w: 2 * PITCH - ROAD_W, h: 2 * PITCH - ROAD_W },
+    beach: { x: LAND, y: 0, w: BEACH_W, h: LAND },
+    sea: { x: LAND + BEACH_W, y: 0, w: SEA_W, h: WORLD_H },
+    docks,
+    bank,
+    garage,
+    isRoad,
+    onSidewalk,
+  };
 }
 
-export function isWater(city, x, y) {
-  const s = CFG.land + CFG.beach;
-  return x >= s || y >= s || (x >= CFG.land && y >= CFG.land);
-}
-
-export function isSand(city, x, y) {
-  return !isWater(city, x, y) && (x >= CFG.land || y >= CFG.land);
-}
-
-export function isOnRoad(city, x, y) {
-  const r = CFG.road / 2;
-  for (const c of city.roads) {
-    if (Math.abs(x - c) <= r || Math.abs(y - c) <= r) return true;
+export function pointInBuilding(buildings, x, y, pad) {
+  const p = pad || 0;
+  for (const b of buildings) {
+    if (x > b.x - p && x < b.x + b.w + p && y > b.y - p && y < b.y + b.h + p) return b;
   }
-  return false;
+  return null;
 }
 
-// Push a circle out of buildings, the water and the world edge.
-// Returns true when the circle was moved (a collision happened).
-export function resolveCircle(city, p, r) {
-  let hit = false;
-  for (const b of city.buildings) {
-    const cx = Math.max(b.x, Math.min(p.x, b.x + b.w));
-    const cy = Math.max(b.y, Math.min(p.y, b.y + b.h));
-    const dx = p.x - cx, dy = p.y - cy;
+// Push a circle out of any building it overlaps. Returns true if pushed.
+export function resolveBuildings(buildings, obj, r) {
+  let pushed = false;
+  for (const b of buildings) {
+    const cx = Math.max(b.x, Math.min(obj.x, b.x + b.w));
+    const cy = Math.max(b.y, Math.min(obj.y, b.y + b.h));
+    const dx = obj.x - cx;
+    const dy = obj.y - cy;
     const d2 = dx * dx + dy * dy;
-    if (d2 < r * r) {
-      if (d2 > 0.0001) {
-        const d = Math.sqrt(d2);
-        p.x = cx + (dx / d) * r;
-        p.y = cy + (dy / d) * r;
-      } else {
-        p.y = b.y - r;
-      }
-      hit = true;
+    if (d2 < r * r && d2 > 0.0001) {
+      const d = Math.sqrt(d2);
+      obj.x = cx + (dx / d) * r;
+      obj.y = cy + (dy / d) * r;
+      pushed = true;
+    } else if (d2 <= 0.0001) {
+      // centre inside the rect: push out along the smallest axis
+      const left = obj.x - b.x;
+      const right = b.x + b.w - obj.x;
+      const top = obj.y - b.y;
+      const bottom = b.y + b.h - obj.y;
+      const m = Math.min(left, right, top, bottom);
+      if (m === left) obj.x = b.x - r;
+      else if (m === right) obj.x = b.x + b.w + r;
+      else if (m === top) obj.y = b.y - r;
+      else obj.y = b.y + b.h + r;
+      pushed = true;
     }
   }
-  // The sea is a wall: keep circles on the sand.
-  const edge = CFG.land + CFG.beach - r;
-  if (p.x > edge && p.y < CFG.land) { p.x = edge; hit = true; }
-  if (p.y > edge && p.x < CFG.land) { p.y = edge; hit = true; }
-  if (p.x >= CFG.land && p.y >= CFG.land) { p.x = CFG.land - r; p.y = CFG.land - r; hit = true; }
-  p.x = Math.max(r, Math.min(CFG.world - r, p.x));
-  p.y = Math.max(r, Math.min(CFG.world - r, p.y));
-  return hit;
+  return pushed;
 }
 
-export function randomRoadPoint(city, rng) {
-  const horizontal = rng.chance(0.5);
-  const road = rng.pick(city.roads);
-  const along = rng.range(140, CFG.land - 140);
-  if (horizontal) return { x: along, y: road + (rng.chance(0.5) ? 27 : -27) };
-  return { x: road + (rng.chance(0.5) ? 27 : -27), y: along };
+// Nearest road-centre point (used to drop entities onto roads).
+export function nearestRoadPoint(x, y) {
+  const nx = Math.round(x / PITCH) * PITCH;
+  const ny = Math.round(y / PITCH) * PITCH;
+  if (Math.abs(x - nx) < Math.abs(y - ny)) return { x: nx, y };
+  return { x, y: ny };
 }
 
-export function randomSidewalkPoint(city, rng) {
-  const bx = rng.int(0, CFG.blocks - 1);
-  const by = rng.int(0, CFG.blocks - 1);
-  const x0 = bx * CFG.pitch + CFG.road;
-  const y0 = by * CFG.pitch + CFG.road;
-  const side = rng.int(0, 3);
-  if (side === 0) return { x: x0 + rng.range(0, CFG.block), y: y0 - 8 };
-  if (side === 1) return { x: x0 + rng.range(0, CFG.block), y: y0 + CFG.block + 8 };
-  if (side === 2) return { x: x0 - 8, y: y0 + rng.range(0, CFG.block) };
-  return { x: x0 + CFG.block + 8, y: y0 + rng.range(0, CFG.block) };
+export function clampWorld(o, margin) {
+  const m = margin || 0;
+  o.x = Math.max(m, Math.min(WORLD_W - m, o.x));
+  o.y = Math.max(m, Math.min(WORLD_H - m, o.y));
 }
