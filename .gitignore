@@ -1,10 +1,8 @@
-# Build output: main.ts writes the hand-in bundle here.
+# Build output from the hand-in program.
 out/
-
-# Editor and OS clutter.
+# Editor and OS leftovers.
 .DS_Store
 Thumbs.db
 *.log
-
-# Dependencies, if a tool ever adds any (the game itself needs none).
+# Dependencies, if any are ever added.
 node_modules/

@@ -1,39 +1,40 @@
-// Progress saves to localStorage: cash, story progress, stashes found and
-// the best wanted level reached. Nothing else leaves the machine.
+// Versioned localStorage saves. Cash, mission progress, collected stashes
+// and the best wanted level carry over between sessions. Saves without a
+// version stamp (none exist yet) are still readable.
 
-const KEY = 'coral-bay-hot-streets-v1';
+const KEY = 'coral-bay-save-v1';
 
 export function loadSave() {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(KEY);
     if (!raw) return null;
-    const d = JSON.parse(raw);
-    if (typeof d !== 'object' || d === null) return null;
-    // Version-tagged saves only: a save from a newer shape is ignored
-    // rather than misread. Saves written before tagging have no v and
-    // still load.
-    if (d.v !== undefined && d.v !== 1) return null;
+    const s = JSON.parse(raw);
+    if (typeof s !== 'object' || s === null) return null;
     return {
-      cash: Math.max(0, d.cash | 0),
-      mission: Math.max(0, Math.min(6, d.mission | 0)),
-      stashes: Math.max(0, d.stashes | 0),
-      bestWanted: Math.max(0, Math.min(5, d.bestWanted | 0)),
+      cash: typeof s.cash === 'number' ? s.cash : 0,
+      mission: typeof s.mission === 'number' ? s.mission : 0,
+      stashes: Array.isArray(s.stashes) ? s.stashes : [],
+      bestStars: typeof s.bestStars === 'number' ? s.bestStars : 0,
     };
-  } catch (e) { return null; }
+  } catch (e) {
+    return null;
+  }
 }
 
-export function storeSave(data) {
+export function writeSave(save) {
   try {
-    localStorage.setItem(KEY, JSON.stringify({
+    window.localStorage.setItem(KEY, JSON.stringify({
       v: 1,
-      cash: data.cash | 0,
-      mission: data.mission | 0,
-      stashes: data.stashes | 0,
-      bestWanted: data.bestWanted | 0,
+      cash: save.cash,
+      mission: save.mission,
+      stashes: save.stashes,
+      bestStars: save.bestStars,
     }));
-  } catch (e) { /* storage is best-effort */ }
+  } catch (e) { /* storage may be unavailable; the game still runs */ }
 }
 
 export function clearSave() {
-  try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
+  try {
+    window.localStorage.removeItem(KEY);
+  } catch (e) { /* ignore */ }
 }

@@ -1,37 +1,34 @@
-// Seeded random numbers. The city, the traffic and the staged screenshot
-// scenes all draw from one of these, so a seed replays the same world.
+// Seeded random numbers. The city layout is built from one fixed seed so
+// every run of the game shows the same Coral Bay.
 
-// Mulberry32: small, fast, deterministic.
-export function makeRng(seed) {
+export function mulberry32(seed) {
   let a = seed >>> 0;
-  return {
-    next() {
-      a |= 0; a = (a + 0x6d2b79f5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    },
-    range(min, max) { return min + this.next() * (max - min); },
-    int(min, max) { return Math.floor(this.range(min, max + 1)); },
-    pick(list) { return list[Math.floor(this.next() * list.length)]; },
-    // Fisher-Yates, in place, so a seed can shuffle an order too.
-    shuffle(list) {
-      for (let i = list.length - 1; i > 0; i--) {
-        const j = Math.floor(this.next() * (i + 1));
-        [list[i], list[j]] = [list[j], list[i]];
-      }
-      return list;
-    },
-    chance(p) { return this.next() < p; },
+  return function next() {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-// Turn any short string into a stable 32-bit seed.
-export function hashSeed(text) {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
+export function makeRng(seed) {
+  const next = mulberry32(seed);
+  return {
+    next,
+    // float in [a, b)
+    range(a, b) {
+      return a + next() * (b - a);
+    },
+    // integer in [a, b] inclusive
+    int(a, b) {
+      return a + Math.floor(next() * (b - a + 1));
+    },
+    pick(arr) {
+      return arr[Math.floor(next() * arr.length)];
+    },
+    chance(p) {
+      return next() < p;
+    },
+  };
 }

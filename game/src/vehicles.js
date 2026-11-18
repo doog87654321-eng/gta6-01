@@ -1,78 +1,121 @@
-// Cars the player drives, steals and wrecks. One physics model serves the
-// player's car and the police cars; traffic cars are lighter (people.js).
+// Cars: top-down physics (accelerate, steer, brake, drift a little) and
+// the top-down drawing. One car type serves the player, traffic and the
+// police; only the colour and the driver differ.
 
 import { CFG } from './config.js';
-import { resolveCircle } from './city.js';
+import { resolveBuildings, clampWorld } from './city.js';
 
-// Draw a top-down car. `opts` may carry model ('sedan' | 'coupe' | 'truck'),
-// taxi (yellow cab with a roof sign) or police (white body, black doors,
-// flashing light bar driven by opts.flash in [-1, 1]).
-export function drawCarShape(ctx, x, y, angle, color, opts) {
-  opts = opts || {};
-  const L = opts.model === 'truck' ? 78 : (opts.model === 'coupe' ? 56 : CFG.car.length);
-  const W = opts.model === 'truck' ? 34 : CFG.car.width;
+const CAR_COLORS = ['#c23b2e', '#3f7d4e', '#c8a13a', '#5b7fa6', '#8a5fa6', '#c8c8c8', '#3a3a3a', '#d97b2e'];
+
+export function randomCarColor(rng) {
+  return rng.pick(CAR_COLORS);
+}
+
+export function makeCar(x, y, angle, color, kind) {
+  return {
+    x, y, angle, speed: 0,
+    color: color || '#c23b2e',
+    kind: kind || 'civilian', // civilian | taxi | cop | player
+    len: CFG.CAR_LEN,
+    wid: CFG.CAR_WID,
+    stalled: 0,   // seconds left stalled (shot to a stop)
+    dead: false,
+    hp: 100,
+  };
+}
+
+// Player-driven car: throttle/steer from the input axis.
+export function driveCar(car, input, dt, buildings) {
+  if (car.stalled > 0) {
+    car.stalled -= dt;
+    car.speed *= Math.max(0, 1 - 3 * dt);
+  } else {
+    const throttle = -input.y; // W is -y: forward
+    if (throttle > 0) car.speed += CFG.CAR_ACCEL * dt;
+    else if (throttle < 0) {
+      car.speed -= (car.speed > 10 ? CFG.CAR_BRAKE : CFG.CAR_REVERSE) * dt;
+    } else {
+      car.speed -= Math.sign(car.speed) * CFG.CAR_FRICTION * dt;
+      if (Math.abs(car.speed) < 8) car.speed = 0;
+    }
+    car.speed = Math.max(-CFG.CAR_REVERSE, Math.min(CFG.CAR_MAX, car.speed));
+    // Steering only bites while the car is actually rolling, and it gets
+    // calmer at top speed so the car doesn't spin at the touch of a key.
+    const steer = input.x;
+    const grip = Math.min(1, Math.abs(car.speed) / 160);
+    const turnRate = 2.4 * (Math.abs(car.speed) > 300 ? 300 / Math.abs(car.speed) : 1);
+    if (Math.abs(car.speed) > 5) {
+      car.angle += steer * turnRate * grip * dt * Math.sign(car.speed);
+    }
+  }
+  car.x += Math.cos(car.angle) * car.speed * dt;
+  car.y += Math.sin(car.angle) * car.speed * dt;
+  // Scrub a little speed on a wall hit, but never glue the car to it:
+  // the driver can still steer or reverse out.
+  if (resolveBuildings(buildings, car, 24)) car.speed *= 0.85;
+  clampWorld(car, 24);
+}
+
+// AI-driven car: follow a heading at a target speed, used by traffic and
+// the police chase (the caller steers toward a target point).
+export function steerCar(car, targetAngle, targetSpeed, dt, buildings) {
+  if (car.stalled > 0) {
+    car.stalled -= dt;
+    car.speed *= Math.max(0, 1 - 3 * dt);
+  } else {
+    let diff = targetAngle - car.angle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    car.angle += Math.max(-2.6 * dt, Math.min(2.6 * dt, diff));
+    if (car.speed < targetSpeed) car.speed += CFG.CAR_ACCEL * 0.7 * dt;
+    else car.speed -= CFG.CAR_FRICTION * dt;
+    car.speed = Math.max(0, Math.min(CFG.CAR_MAX, car.speed));
+  }
+  car.x += Math.cos(car.angle) * car.speed * dt;
+  car.y += Math.sin(car.angle) * car.speed * dt;
+  if (resolveBuildings(buildings, car, 24)) car.speed *= 0.85;
+  clampWorld(car, 24);
+}
+
+export function drawCar(ctx, car) {
   ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle);
-  // Shadow.
+  ctx.translate(car.x, car.y);
+  ctx.rotate(car.angle);
+  const l = car.len;
+  const w = car.wid;
+  // shadow
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.fillRect(-L / 2 + 3, -W / 2 + 4, L, W);
-  // Wheels.
-  ctx.fillStyle = '#151515';
-  const wl = L * 0.28, ww = 6;
-  ctx.fillRect(-L / 2 + 6, -W / 2 - 3, wl, ww);
-  ctx.fillRect(-L / 2 + 6, W / 2 - 3, wl, ww);
-  ctx.fillRect(L / 2 - 6 - wl, -W / 2 - 3, wl, ww);
-  ctx.fillRect(L / 2 - 6 - wl, W / 2 - 3, wl, ww);
-  // Body.
-  ctx.fillStyle = color;
-  roundRect(ctx, -L / 2, -W / 2, L, W, 9);
+  ctx.fillRect(-l / 2 + 3, -w / 2 + 3, l, w);
+  // body
+  ctx.fillStyle = car.color;
+  roundRect(ctx, -l / 2, -w / 2, l, w, 6);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  // Hood and boot shading.
-  ctx.fillStyle = 'rgba(255,255,255,0.10)';
-  ctx.fillRect(L / 2 - 14, -W / 2 + 3, 11, W - 6);
-  // Windshield and rear window.
-  ctx.fillStyle = '#1c2733';
-  roundRect(ctx, L * 0.08, -W / 2 + 4, L * 0.16, W - 8, 3);
-  ctx.fill();
-  roundRect(ctx, -L * 0.3, -W / 2 + 4, L * 0.1, W - 8, 3);
-  ctx.fill();
-  if (opts.model === 'truck') {
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.fillRect(-L / 2 + 4, -W / 2 + 4, L * 0.42, W - 8);
-  }
-  if (opts.taxi) {
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(-8, -W / 2 + 2, 16, 5);
-    ctx.fillStyle = '#f5d90a';
-    ctx.fillRect(-7, -14, 14, 7);
+  // roof + windshield
+  ctx.fillStyle = 'rgba(20,24,28,0.85)';
+  ctx.fillRect(-l * 0.18, -w / 2 + 4, l * 0.28, w - 8);
+  ctx.fillStyle = 'rgba(180,220,240,0.5)';
+  ctx.fillRect(l * 0.22, -w / 2 + 4, l * 0.1, w - 8);
+  // headlights / taillights
+  ctx.fillStyle = '#ffe9a8';
+  ctx.fillRect(l / 2 - 2, -w / 2 + 2, 2, 4);
+  ctx.fillRect(l / 2 - 2, w / 2 - 6, 2, 4);
+  ctx.fillStyle = '#ff3b30';
+  ctx.fillRect(-l / 2, -w / 2 + 2, 2, 4);
+  ctx.fillRect(-l / 2, w / 2 - 6, 2, 4);
+  if (car.kind === 'cop') {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(-l * 0.05, -w / 2 + 2, l * 0.12, w - 4);
     ctx.fillStyle = '#111';
-    ctx.font = 'bold 6px sans-serif';
+    ctx.font = 'bold 7px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('TAXI', 0, -8.5);
+    ctx.fillText('PD', 0, 2.5);
   }
-  if (opts.police) {
-    // Black doors on a white body.
-    ctx.fillStyle = '#14181d';
-    ctx.fillRect(-L * 0.12, -W / 2 + 2, L * 0.24, W - 4);
-    ctx.fillStyle = '#e8e8e8';
-    ctx.font = 'bold 8px sans-serif';
+  if (car.kind === 'taxi') {
+    ctx.fillStyle = '#111';
+    ctx.font = 'bold 7px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('PD', 0, 3);
-    // Light bar, flashing red / blue.
-    const flash = opts.flash || 0;
-    ctx.fillStyle = flash > 0 ? '#ff2e2e' : '#3a86ff';
-    ctx.beginPath(); ctx.arc(-6, -W / 2 + 2, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = flash > 0 ? '#3a86ff' : '#ff2e2e';
-    ctx.beginPath(); ctx.arc(6, -W / 2 + 2, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillText('TAXI', 0, 2.5);
   }
-  // Headlights.
-  ctx.fillStyle = 'rgba(255,244,180,0.95)';
-  ctx.fillRect(L / 2 - 2, -W / 2 + 5, 3, 6);
-  ctx.fillRect(L / 2 - 2, W / 2 - 11, 3, 6);
   ctx.restore();
 }
 
@@ -84,96 +127,4 @@ export function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
-}
-
-export class Car {
-  constructor(x, y, angle, color, model) {
-    this.x = x; this.y = y;
-    this.angle = angle;
-    this.speed = 0;
-    this.color = color;
-    this.model = model || 'sedan';
-    this.health = CFG.car.health;
-    this.wrecked = false;
-    this.taxi = false;
-    this.smoke = 0;
-  }
-
-  get length() { return this.model === 'truck' ? 78 : (this.model === 'coupe' ? 56 : CFG.car.length); }
-
-  // Drive with W/S (gas/brake/reverse) and A/D (steer). Returns the speed
-  // change so the caller can play crash sounds on hard hits.
-  drive(dt, city, others) {
-    // A wrecked car stays wrecked: no throttle, no steering, no drift.
-    if (this.wrecked) { this.speed = 0; return this.speed; }
-    const k = CFG.car;
-    let throttle = 0, steer = 0;
-    if (this._gas) throttle += 1;
-    if (this._brake) throttle -= 1;
-    if (this._left) steer -= 1;
-    if (this._right) steer += 1;
-    if (throttle > 0) this.speed += k.accel * dt;
-    else if (throttle < 0) {
-      if (this.speed > 30) this.speed -= k.brake * dt;
-      else this.speed -= k.accel * 0.55 * dt;
-    } else {
-      this.speed -= this.speed * 1.6 * dt;
-      if (Math.abs(this.speed) < 4) this.speed = 0;
-    }
-    this.speed = Math.max(-k.reverseMax, Math.min(k.maxSpeed, this.speed));
-    const grip = Math.min(1, Math.abs(this.speed) / 140);
-    this.angle += steer * k.turn * grip * dt * (this.speed >= 0 ? 1 : -1);
-    const nx = this.x + Math.cos(this.angle) * this.speed * dt;
-    const ny = this.y + Math.sin(this.angle) * this.speed * dt;
-    this.x = nx; this.y = ny;
-    const hitWall = resolveCircle(this._city || city, this, 20);
-    if (hitWall && Math.abs(this.speed) > 180) {
-      this.health -= Math.abs(this.speed) * 0.03;
-      this.speed *= 0.45;
-    }
-    // Bump into other cars.
-    for (const o of others || []) {
-      if (o === this || o.wrecked) continue;
-      const dx = this.x - o.x, dy = this.y - o.y;
-      const d = Math.hypot(dx, dy);
-      const min = 44;
-      if (d > 0.01 && d < min) {
-        const push = (min - d) / 2;
-        const ux = dx / d, uy = dy / d;
-        this.x += ux * push; this.y += uy * push;
-        if (o.x !== undefined && o.speed !== undefined) { o.x -= ux * push; o.y -= uy * push; }
-        if (Math.abs(this.speed) > 200) { this.health -= 4; this.speed *= 0.8; }
-      }
-    }
-    if (this.health <= 0 && !this.wrecked) { this.wrecked = true; this.speed = 0; }
-    if (this.wrecked) this.smoke = Math.min(1, this.smoke + dt);
-    return this.speed;
-  }
-
-  setInput(gas, brake, left, right) {
-    this._gas = gas; this._brake = brake; this._left = left; this._right = right;
-  }
-
-  draw(ctx, cam, flash) {
-    const x = this.x - cam.x, y = this.y - cam.y;
-    if (x < -90 || y < -90 || x > CFG.viewW + 90 || y > CFG.viewH + 90) return;
-    if (this.wrecked) {
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(this.angle + 0.2);
-      ctx.globalAlpha = 0.85;
-      ctx.fillStyle = '#222';
-      roundRect(ctx, -this.length / 2, -CFG.car.width / 2, this.length, CFG.car.width, 9);
-      ctx.fill();
-      ctx.restore();
-      if (this.smoke > 0) {
-        ctx.fillStyle = `rgba(60,60,60,${0.35 * this.smoke})`;
-        ctx.beginPath();
-        ctx.arc(x + Math.sin(performance.now() / 300) * 6, y - 14 - this.smoke * 10, 10 + this.smoke * 14, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      return;
-    }
-    drawCarShape(ctx, x, y, this.angle, this.color, { model: this.model, taxi: this.taxi, police: this.police, flash });
-  }
 }
