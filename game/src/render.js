@@ -367,7 +367,7 @@ export function drawHUD(ctx, game) {
   // Controls hint, bottom left.
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = '12px sans-serif';
-  ctx.fillText('WASD move / drive · Mouse aim · Click shoot · E enter car · R reload · Esc pause · M mute', 16, CFG.viewH - 14);
+  ctx.fillText('WASD move / drive · Mouse aim · Click shoot · E enter car · H horn · R reload · Esc pause · M mute', 16, CFG.viewH - 14);
 
   drawMinimap(ctx, game);
 }
@@ -405,12 +405,14 @@ export function drawMinimap(ctx, game) {
     ctx.fillStyle = '#f5d90a';
     ctx.beginPath(); ctx.arc(x0 + m.x * s, y0 + m.y * s, 4, 0, Math.PI * 2); ctx.fill();
   }
-  // The player, white with a dark ring.
+  // The player, white with a dark ring — bigger while driving, so the
+  // minimap reads at a glance whether Ray is on foot or in a car.
+  const pr = game.player.car ? 5 : 4;
   ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.arc(x0 + game.player.x * s, y0 + game.player.y * s, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x0 + game.player.x * s, y0 + game.player.y * s, pr, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = '#111';
   ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.arc(x0 + game.player.x * s, y0 + game.player.y * s, 4, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x0 + game.player.x * s, y0 + game.player.y * s, pr, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
   ctx.strokeStyle = 'rgba(255,255,255,0.35)';
   ctx.lineWidth = 1;
@@ -451,7 +453,7 @@ export function drawTitle(ctx, game) {
   ctx.fillStyle = '#9fb4c8';
   ctx.font = '15px sans-serif';
   ctx.fillText('WASD / arrows — walk & drive · Shift — run · Mouse — aim · Click — shoot', vw / 2, 520);
-  ctx.fillText('E — enter / steal a car · R — reload · Esc — pause · M — mute', vw / 2, 546);
+  ctx.fillText('E — enter / steal a car · H — horn · R — reload · Esc — pause · M — mute', vw / 2, 546);
   ctx.fillStyle = 'rgba(255,255,255,0.4)';
   ctx.font = '12px sans-serif';
   ctx.fillText('An original game. No Rockstar assets, names or maps — Coral Bay is entirely made up.', vw / 2, 640);

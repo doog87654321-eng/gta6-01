@@ -9,6 +9,10 @@ export function loadSave() {
     if (!raw) return null;
     const d = JSON.parse(raw);
     if (typeof d !== 'object' || d === null) return null;
+    // Version-tagged saves only: a save from a newer shape is ignored
+    // rather than misread. Saves written before tagging have no v and
+    // still load.
+    if (d.v !== undefined && d.v !== 1) return null;
     return {
       cash: Math.max(0, d.cash | 0),
       mission: Math.max(0, Math.min(6, d.mission | 0)),
@@ -21,6 +25,7 @@ export function loadSave() {
 export function storeSave(data) {
   try {
     localStorage.setItem(KEY, JSON.stringify({
+      v: 1,
       cash: data.cash | 0,
       mission: data.mission | 0,
       stashes: data.stashes | 0,

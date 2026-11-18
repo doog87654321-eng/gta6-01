@@ -85,6 +85,9 @@ export function buildCity(seed) {
     [roadCenter(8) - 120, roadCenter(1) + 240],
   ];
   for (const [x, y] of stash) city.stashSpots.push({ x, y, taken: false });
+  // The order varies by seed, so the three mission stashes are not always
+  // the same three corners of the map.
+  rng.shuffle(city.stashSpots);
 
   return city;
 }

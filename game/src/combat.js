@@ -29,11 +29,11 @@ export class Combat {
     };
     for (const p of game.peds.list) test(game.peds.px(p), game.peds.py(p), 12, 'ped', p);
     for (const cop of game.police.cops) test(cop.x, cop.y, 12, 'cop', cop);
-    for (const c of game.traffic.list) test(game.traffic.x(c), game.traffic.y(c), 26, 'traffic', c);
-    for (const c of game.police.cars) test(c.x, c.y, 26, 'police', c);
-    if (game.player.car && game.player.car !== null) {
-      // The player's own car never blocks a shot.
-    }
+    // Cars are long (a truck is 78 px): a 26 px circle misses shots that
+    // pass through their ends, so cars get a wider hit circle.
+    for (const c of game.traffic.list) test(game.traffic.x(c), game.traffic.y(c), 34, 'traffic', c);
+    for (const c of game.police.cars) test(c.x, c.y, 34, 'police', c);
+    // The player's own car is never in the lists above, so it never blocks.
     const hx = x + dx * bestT, hy = y + dy * bestT;
     this.addTracer(x, y, hx, hy);
     this.muzzle = { x, y, t: 0.05 };
@@ -49,7 +49,7 @@ export class Combat {
         if (hit.health <= 0) game.police.addCrime(CFG.wanted.kill, game);
       } else if (hitKind === 'traffic') {
         hit.hp = (hit.hp ?? 68) - CFG.player.shotDamage;
-        if (hit.hp <= 0) hit.speed = 0;
+        if (hit.hp <= 0) { hit.speed = 0; hit.stallT = 3; }
         game.police.addCrime(CFG.wanted.shoot, game);
       } else if (hitKind === 'police') {
         hit.health -= CFG.player.shotDamage;

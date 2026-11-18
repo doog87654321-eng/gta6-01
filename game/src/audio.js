@@ -41,7 +41,8 @@ export class Sfx {
     if (!this.ctx || this.muted || !this.engineOsc) return;
     const t = this.ctx.currentTime;
     this.engineOsc.frequency.setTargetAtTime(55 + level * 130, t, 0.08);
-    this.engineGain.gain.setTargetAtTime(0.028 + level * 0.035, t, 0.1);
+    // Level 0 means on foot: silence the drone instead of humming at idle.
+    this.engineGain.gain.setTargetAtTime(level <= 0 ? 0 : 0.028 + level * 0.035, t, 0.1);
   }
 
   siren(on) {
@@ -89,6 +90,8 @@ export class Sfx {
   }
 
   shot() { this.noise(0.14, 0.22); this.tone(190, 0.08, 'square', 0.05); }
+  // Two-tone car horn, for the H key while driving.
+  horn() { this.tone(370, 0.22, 'square', 0.07); setTimeout(() => this.tone(440, 0.22, 'square', 0.06), 40); }
   reload() { this.tone(520, 0.07, 'square', 0.05); }
   pickup() { this.tone(880, 0.1, 'sine', 0.08); this.tone(1320, 0.14, 'sine', 0.06); }
   cash() { this.tone(990, 0.09, 'sine', 0.09); setTimeout(() => this.tone(1480, 0.16, 'sine', 0.08), 90); }

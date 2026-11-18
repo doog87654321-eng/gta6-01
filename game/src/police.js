@@ -6,8 +6,6 @@ import { CFG } from './config.js';
 import { Car } from './vehicles.js';
 import { randomRoadPoint } from './city.js';
 
-const COP_COLORS = ['#e8e8e8'];
-
 export class Police {
   constructor(city, rng) {
     this.city = city;
@@ -48,9 +46,15 @@ export class Police {
     // Keep the right number of police cars on the street.
     const want = CFG.police.carsByStars[this.stars];
     while (this.cars.length < want) {
-      const p = randomRoadPoint(this.city, this.rng);
-      // Spawn a few blocks away, never on top of the player.
-      if (Math.hypot(p.x - player.x, p.y - player.y) < 500) continue;
+      // Spawn a few blocks away, never on top of the player. Bounded
+      // tries: if every pick is too close, take the farthest tried.
+      let p = null, bestD = -1;
+      for (let tries = 0; tries < 12; tries++) {
+        const cand = randomRoadPoint(this.city, this.rng);
+        const d = Math.hypot(cand.x - player.x, cand.y - player.y);
+        if (d >= 500) { p = cand; break; }
+        if (d > bestD) { bestD = d; p = cand; }
+      }
       const car = new Car(p.x, p.y, 0, '#e8e8e8', 'sedan');
       car.police = true;
       car._city = this.city;
@@ -73,9 +77,7 @@ export class Police {
       const dist = Math.hypot(tx - c.x, ty - c.y);
       c.setInput(dist > 90, false, diff < -0.08, diff > 0.08);
       // Slow down when close so the ram is a bump, not a teleport.
-      const before = c.speed;
       c.drive(dt, this.city, this.cars.concat(player.car ? [player.car] : []));
-      void before;
       if (player.car && !player.car.wrecked) {
         const d = Math.hypot(c.x - player.car.x, c.y - player.car.y);
         if (d < 46 && Math.abs(c.speed) > 120) {
@@ -130,7 +132,6 @@ export class Police {
       ctx.beginPath(); ctx.arc(x, y - 1, 4.5, 0, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#d8b13a';
       ctx.fillRect(x - 5, y - 9, 10, 3);
-      void COP_COLORS;
     }
   }
 }

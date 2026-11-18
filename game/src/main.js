@@ -20,6 +20,11 @@ const game = new Game(canvas, { shot: shotName, seed });
 window.__game = game;
 attachInput(canvas);
 
+// Alt-tabbing mid-chase should not get Ray killed: pause on blur.
+window.addEventListener('blur', () => {
+  if (game.state === 'playing') game.togglePause();
+});
+
 if (shotName) {
   stageShot(game, shotName);
   game.sfx.setMuted(true);

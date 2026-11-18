@@ -7,7 +7,7 @@
 //     mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 //   In the grader's container MAKEFUN_OUTPUT_DIR is unset and /output is used.
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
@@ -28,15 +28,31 @@ const dossierCaps = {
   game_path_max_bytes: 1000,
 };
 
+// Count the files under a directory, subdirectories included.
+function countFiles(dir) {
+  let n = 0;
+  for (const e of readdirSync(dir)) {
+    const p = join(dir, e);
+    n += statSync(p).isDirectory() ? countFiles(p) : 1;
+  }
+  return n;
+}
+
 function handIn() {
+  // Fail fast on a hand-in the scorer would refuse, instead of building
+  // a dossier for it: the game entrypoint and 3-4 screenshots must exist.
+  if (!existsSync(join(repoRoot, 'game', 'index.html'))) throw new Error('game/index.html is missing');
+  const shotsDir = join(repoRoot, 'screenshots');
+  if (!existsSync(shotsDir)) throw new Error('screenshots/ is missing: the gate needs 3-4 screenshots');
+  const shotFiles = readdirSync(shotsDir).filter((f) => /\.(png|jpe?g)$/i.test(f));
+  if (shotFiles.length < 3 || shotFiles.length > 4) throw new Error(`screenshots/ holds ${shotFiles.length} images, the gate needs 3-4`);
   mkdirSync(handInDir, { recursive: true });
   cpSync(join(repoRoot, 'game'), join(handInDir, 'game'), { recursive: true });
   mkdirSync(join(handInDir, 'screenshots'), { recursive: true });
-  if (existsSync(join(repoRoot, 'screenshots'))) {
-    cpSync(join(repoRoot, 'screenshots'), join(handInDir, 'screenshots'), { recursive: true });
-  }
+  cpSync(shotsDir, join(handInDir, 'screenshots'), { recursive: true });
   const dossier = buildDossier(handInDir, dossierCaps);
   writeFileSync(join(handInDir, 'dossier.json'), dossier);
+  console.log(`hand-in: game ${countFiles(join(handInDir, 'game'))} files, ${shotFiles.length} screenshots, dossier ${dossier.length} bytes`);
 }
 
 handIn();
